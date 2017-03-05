@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.beans.factory.BeanCreationException;
@@ -41,7 +42,6 @@ import org.springframework.context.support.MessageSourceAccessor;
 import org.springframework.context.support.ReloadableResourceBundleMessageSource;
 import org.springframework.core.Ordered;
 import org.springframework.core.convert.ConversionService;
-import org.springframework.core.convert.support.ConfigurableConversionService;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.auditing.AuditableBeanWrapperFactory;
 import org.springframework.data.auditing.MappingAuditableBeanWrapperFactory;
@@ -76,6 +76,7 @@ import org.springframework.data.rest.webmvc.BasePathAwareController;
 import org.springframework.data.rest.webmvc.BasePathAwareHandlerMapping;
 import org.springframework.data.rest.webmvc.BaseUri;
 import org.springframework.data.rest.webmvc.EmbeddedResourcesAssembler;
+import org.springframework.data.rest.webmvc.HttpHeadersPreparer;
 import org.springframework.data.rest.webmvc.ProfileResourceProcessor;
 import org.springframework.data.rest.webmvc.RepositoryRestController;
 import org.springframework.data.rest.webmvc.RepositoryRestExceptionHandler;
@@ -89,10 +90,13 @@ import org.springframework.data.rest.webmvc.convert.UriListHttpMessageConverter;
 import org.springframework.data.rest.webmvc.json.DomainObjectReader;
 import org.springframework.data.rest.webmvc.json.EnumTranslator;
 import org.springframework.data.rest.webmvc.json.Jackson2DatatypeHelper;
+import org.springframework.data.rest.webmvc.json.JacksonMappingAwareSortTranslator;
 import org.springframework.data.rest.webmvc.json.JacksonSerializers;
+import org.springframework.data.rest.webmvc.json.MappingAwareDefaultedPageableArgumentResolver;
+import org.springframework.data.rest.webmvc.json.MappingAwarePageableArgumentResolver;
+import org.springframework.data.rest.webmvc.json.MappingAwareSortArgumentResolver;
 import org.springframework.data.rest.webmvc.json.PersistentEntityJackson2Module;
 import org.springframework.data.rest.webmvc.json.PersistentEntityJackson2Module.LookupObjectSerializer;
-import org.springframework.data.rest.webmvc.json.PersistentEntityJackson2Module.NestedEntitySerializer;
 import org.springframework.data.rest.webmvc.json.PersistentEntityToJsonSchemaConverter;
 import org.springframework.data.rest.webmvc.json.PersistentEntityToJsonSchemaConverter.ValueTypeSchemaPropertyCustomizerFactory;
 import org.springframework.data.rest.webmvc.mapping.Associations;
@@ -101,8 +105,8 @@ import org.springframework.data.rest.webmvc.spi.BackendIdConverter;
 import org.springframework.data.rest.webmvc.spi.BackendIdConverter.DefaultIdConverter;
 import org.springframework.data.rest.webmvc.support.BackendIdHandlerMethodArgumentResolver;
 import org.springframework.data.rest.webmvc.support.DefaultExcerptProjector;
-import org.springframework.data.rest.webmvc.support.DefaultedPageableHandlerMethodArgumentResolver;
 import org.springframework.data.rest.webmvc.support.DelegatingHandlerMapping;
+import org.springframework.data.rest.webmvc.support.DomainClassResolver;
 import org.springframework.data.rest.webmvc.support.ETagArgumentResolver;
 import org.springframework.data.rest.webmvc.support.ExcerptProjector;
 import org.springframework.data.rest.webmvc.support.HttpMethodHandlerMethodArgumentResolver;
@@ -112,6 +116,7 @@ import org.springframework.data.rest.webmvc.support.RepositoryEntityLinks;
 import org.springframework.data.util.AnnotatedTypeScanner;
 import org.springframework.data.web.HateoasPageableHandlerMethodArgumentResolver;
 import org.springframework.data.web.HateoasSortHandlerMethodArgumentResolver;
+import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.data.web.config.EnableSpringDataWebSupport;
 import org.springframework.data.web.config.HateoasAwareSpringDataWebConfiguration;
 import org.springframework.data.web.config.SpringDataJacksonConfiguration;
@@ -135,9 +140,12 @@ import org.springframework.plugin.core.OrderAwarePluginRegistry;
 import org.springframework.plugin.core.PluginRegistry;
 import org.springframework.util.ClassUtils;
 import org.springframework.web.bind.support.ConfigurableWebBindingInitializer;
+import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
+import org.springframework.web.servlet.HandlerExceptionResolver;
 import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter;
 import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
@@ -157,11 +165,12 @@ import com.fasterxml.jackson.databind.SerializationFeature;
  * @author Oliver Gierke
  * @author Jon Brisbin
  * @author Greg Turnquist
+ * @author Mark Paluch
  */
 @Configuration
 @EnableHypermediaSupport(type = HypermediaType.HAL)
 @ComponentScan(basePackageClasses = RepositoryRestController.class,
-		includeFilters = @Filter(BasePathAwareController.class) , useDefaultFilters = false)
+		includeFilters = @Filter(BasePathAwareController.class), useDefaultFilters = false)
 @ImportResource("classpath*:META-INF/spring-data-rest/**/*.xml")
 @Import({ SpringDataJacksonConfiguration.class, EnableSpringDataWebSupport.QuerydslActivator.class })
 public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebConfiguration implements InitializingBean {
@@ -222,7 +231,6 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 		addFormatters(conversionService);
 
 		configurerDelegate.configureConversionService(conversionService);
-		configureConversionService(conversionService);
 
 		return conversionService;
 	}
@@ -237,7 +245,6 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 
 		ValidatingRepositoryEventListener listener = new ValidatingRepositoryEventListener(entities);
 		configurerDelegate.configureValidatingRepositoryEventListener(listener);
-		configureValidatingRepositoryEventListener(listener);
 
 		return listener;
 	}
@@ -267,7 +274,6 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 		RepositoryRestConfiguration config = new RepositoryRestConfiguration(configuration, metadataConfiguration(),
 				enumTranslator());
 		configurerDelegate.configureRepositoryRestConfiguration(config);
-		configureRepositoryRestConfiguration(config);
 
 		return config;
 	}
@@ -566,24 +572,38 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 	}
 
 	/**
+	 * {@link HttpRequestHandlerAdapter} to handle CORS preflight requests.
+	 *
+	 * @return
+	 */
+	@Bean
+	public HttpRequestHandlerAdapter httpRequestHandlerAdapter() {
+		return new HttpRequestHandlerAdapter();
+	}
+
+	/**
 	 * The {@link HandlerMapping} to delegate requests to Spring Data REST controllers. Sets up a
 	 * {@link DelegatingHandlerMapping} to make sure manually implemented {@link BasePathAwareController} instances that
 	 * register custom handlers for certain media types don't cause the {@link RepositoryRestHandlerMapping} to be
-	 * omitted.
-	 * 
-	 * @see DATAREST-490
+	 * omitted. See DATAREST-490.
+	 *
 	 * @return
 	 */
 	@Bean
 	public DelegatingHandlerMapping restHandlerMapping() {
 
-		RepositoryRestHandlerMapping repositoryMapping = new RepositoryRestHandlerMapping(resourceMappings(), config());
+		Map<String, CorsConfiguration> corsConfigurations = config().getCorsRegistry().getCorsConfigurations();
+
+		RepositoryRestHandlerMapping repositoryMapping = new RepositoryRestHandlerMapping(resourceMappings(), config(),
+				repositories());
 		repositoryMapping.setJpaHelper(jpaHelper());
 		repositoryMapping.setApplicationContext(applicationContext);
+		repositoryMapping.setCorsConfigurations(corsConfigurations);
 		repositoryMapping.afterPropertiesSet();
 
 		BasePathAwareHandlerMapping basePathMapping = new BasePathAwareHandlerMapping(config());
 		basePathMapping.setApplicationContext(applicationContext);
+		basePathMapping.setCorsConfigurations(corsConfigurations);
 		basePathMapping.afterPropertiesSet();
 
 		List<HandlerMapping> mappings = new ArrayList<HandlerMapping>();
@@ -614,12 +634,11 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 
 		EmbeddedResourcesAssembler assembler = new EmbeddedResourcesAssembler(entities, associationLinks(),
 				excerptProjector());
-		NestedEntitySerializer serializer = new NestedEntitySerializer(entities, assembler, resourceProcessorInvoker());
 		LookupObjectSerializer lookupObjectSerializer = new LookupObjectSerializer(
 				OrderAwarePluginRegistry.create(getEntityLookups()));
 
 		return new PersistentEntityJackson2Module(associationLinks(), entities, uriToEntityConverter, linkCollector(),
-				repositoryInvokerFactory, serializer, lookupObjectSerializer);
+				repositoryInvokerFactory, lookupObjectSerializer, resourceProcessorInvoker(), assembler);
 	}
 
 	@Bean
@@ -641,22 +660,20 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 		return new DefaultExcerptProjector(projectionFactory, resourceMappings());
 	}
 
-	/**
-	 * Bean for looking up methods annotated with {@link org.springframework.web.bind.annotation.ExceptionHandler}.
-	 * 
-	 * @return
+	/* 
+	 * (non-Javadoc)
+	 * @see org.springframework.web.servlet.config.annotation.WebMvcConfigurerAdapter#extendHandlerExceptionResolvers(java.util.List)
 	 */
-	@Bean
-	public ExceptionHandlerExceptionResolver exceptionHandlerExceptionResolver() {
+	@Override
+	public void extendHandlerExceptionResolvers(List<HandlerExceptionResolver> exceptionResolvers) {
 
 		ExceptionHandlerExceptionResolver er = new ExceptionHandlerExceptionResolver();
 		er.setCustomArgumentResolvers(defaultMethodArgumentResolvers());
 		er.setMessageConverters(defaultMessageConverters());
 
 		configurerDelegate.configureExceptionHandlerExceptionResolver(er);
-		configureExceptionHandlerExceptionResolver(er);
 
-		return er;
+		exceptionResolvers.add(0, er);
 	}
 
 	@Bean
@@ -695,7 +712,6 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 		messageConverters.add(uriListHttpMessageConverter());
 
 		configurerDelegate.configureHttpMessageConverters(messageConverters);
-		configureHttpMessageConverters(messageConverters);
 
 		return messageConverters;
 	}
@@ -752,6 +768,11 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 	}
 
 	@Bean
+	public HttpHeadersPreparer httpHeadersPreparer() {
+		return new HttpHeadersPreparer(auditableBeanWrapperFactory());
+	}
+
+	@Bean
 	public SelfLinkProvider selfLinkProvider() {
 		return new DefaultSelfLinkProvider(persistentEntities(), entityLinks(), getEntityLookups());
 	}
@@ -780,11 +801,19 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 				persistentEntities(), selfLinkProvider(), config().getProjectionConfiguration(), projectionFactory,
 				associationLinks());
 
-		HateoasPageableHandlerMethodArgumentResolver pageableResolver = pageableResolver();
-		HandlerMethodArgumentResolver defaultedPageableResolver = new DefaultedPageableHandlerMethodArgumentResolver(
-				pageableResolver);
+		PageableHandlerMethodArgumentResolver pageableResolver = pageableResolver();
 
-		return Arrays.asList(defaultedPageableResolver, pageableResolver, sortResolver(),
+		JacksonMappingAwareSortTranslator sortTranslator = new JacksonMappingAwareSortTranslator(objectMapper(),
+				repositories(), DomainClassResolver.of(repositories(), resourceMappings(), baseUri()), persistentEntities(),
+				associationLinks());
+
+		HandlerMethodArgumentResolver sortResolver = new MappingAwareSortArgumentResolver(sortTranslator, sortResolver());
+		HandlerMethodArgumentResolver jacksonPageableResolver = new MappingAwarePageableArgumentResolver(sortTranslator,
+				pageableResolver);
+		HandlerMethodArgumentResolver defaultedPageableResolver = new MappingAwareDefaultedPageableArgumentResolver(
+				sortTranslator, pageableResolver);
+
+		return Arrays.asList(defaultedPageableResolver, jacksonPageableResolver, sortResolver,
 				serverHttpRequestMethodArgumentResolver(), repoRequestArgumentResolver(), persistentEntityArgumentResolver(),
 				resourceMetadataHandlerMethodArgumentResolver(), HttpMethodHandlerMethodArgumentResolver.INSTANCE, peraResolver,
 				backendIdHandlerMethodArgumentResolver(), eTagArgumentResolver());
@@ -799,6 +828,10 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 		objectMapper.configure(SerializationFeature.INDENT_OUTPUT, true);
 		objectMapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
 		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+		// Configure custom Modules
+		configurerDelegate.configureJacksonObjectMapper(objectMapper);
+
 		objectMapper.registerModule(geoModule);
 
 		if (config().isEnableEnumTranslation()) {
@@ -806,9 +839,6 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 		}
 
 		Jackson2DatatypeHelper.configureObjectMapper(objectMapper);
-		// Configure custom Modules
-		configurerDelegate.configureJacksonObjectMapper(objectMapper);
-		configureJacksonObjectMapper(objectMapper);
 
 		return objectMapper;
 	}
@@ -903,69 +933,4 @@ public class RepositoryRestMvcConfiguration extends HateoasAwareSpringDataWebCon
 			return order;
 		}
 	}
-
-	/**
-	 * Override this method to add additional configuration.
-	 * 
-	 * @param config Main configuration bean.
-	 * @deprecated since 2.4, implement
-	 *             {@link RepositoryRestConfigurer#configureRepositoryRestConfiguration(RepositoryRestConfiguration)}
-	 *             either directly or extend {@link RepositoryRestConfigurerAdapter} and override the method.
-	 */
-	@Deprecated
-	protected void configureRepositoryRestConfiguration(RepositoryRestConfiguration config) {}
-
-	/**
-	 * Override this method to add your own converters.
-	 * 
-	 * @param conversionService Default ConversionService bean.
-	 * @deprecated since 2.4, implement
-	 *             {@link RepositoryRestConfigurer#configureConversionService(ConfigurableConversionService)} either
-	 *             directly or extend {@link RepositoryRestConfigurerAdapter} and override the method.
-	 */
-	@Deprecated
-	protected void configureConversionService(ConfigurableConversionService conversionService) {}
-
-	/**
-	 * Override this method to add validators manually.
-	 * 
-	 * @param validatingListener The {@link org.springframework.context.ApplicationListener} responsible for invoking
-	 *          {@link org.springframework.validation.Validator} instances.
-	 * @deprecated since 2.4, implement
-	 *             {@link RepositoryRestConfigurer#configureValidatingRepositoryEventListener(ValidatingRepositoryEventListener)}
-	 *             either directly or extend {@link RepositoryRestConfigurerAdapter} and override the method.
-	 */
-	@Deprecated
-	protected void configureValidatingRepositoryEventListener(ValidatingRepositoryEventListener validatingListener) {}
-
-	/**
-	 * Configure the {@link ExceptionHandlerExceptionResolver}.
-	 * 
-	 * @param exceptionResolver The default exception resolver on which you can add custom argument resolvers.
-	 * @deprecated since 2.4, implement
-	 *             {@link RepositoryRestConfigurer#configureExceptionHandlerExceptionResolver(ExceptionHandlerExceptionResolver)}
-	 *             either directly or extend {@link RepositoryRestConfigurerAdapter} and override the method.
-	 */
-	@Deprecated
-	protected void configureExceptionHandlerExceptionResolver(ExceptionHandlerExceptionResolver exceptionResolver) {}
-
-	/**
-	 * Configure the available {@link HttpMessageConverter}s by adding your own.
-	 * 
-	 * @param messageConverters The converters to be used by the system.
-	 * @deprecated since 2.4, implement {@link RepositoryRestConfigurer#configureHttpMessageConverters(List)} either
-	 *             directly or extend {@link RepositoryRestConfigurerAdapter} and override the method.
-	 */
-	@Deprecated
-	protected void configureHttpMessageConverters(List<HttpMessageConverter<?>> messageConverters) {}
-
-	/**
-	 * Configure the Jackson {@link ObjectMapper} directly.
-	 * 
-	 * @param objectMapper The {@literal ObjectMapper} to be used by the system.
-	 * @deprecated since 2.4, implement {@link RepositoryRestConfigurer#configureJacksonObjectMapper(ObjectMapper)} either
-	 *             directly or extend {@link RepositoryRestConfigurerAdapter} and override the method.
-	 */
-	@Deprecated
-	protected void configureJacksonObjectMapper(ObjectMapper objectMapper) {}
 }

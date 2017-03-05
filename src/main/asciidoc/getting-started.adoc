@@ -120,7 +120,7 @@ class CustomRestMvcConfiguration {
 
       @Override
       public void configureRepositoryRestConfiguration(RepositoryRestConfiguration config) {
-        configuration.setBasePath("/api")
+        config.setBasePath("/api");
       }
     };
   }
@@ -136,7 +136,7 @@ public class CustomizedRestMvcConfiguration extends RepositoryRestConfigurerAdap
 
   @Override
   public void configureRepositoryRestConfiguration(RepositoryRestConfiguration config) {
-    configuration.setBasePath("/api")
+    config.setBasePath("/api");
   }
 }
 ----
@@ -160,7 +160,7 @@ There are many properties you can alter:
 | sortParamName      | change name of the query parameter for sorting
 | defaultMediaType   | change default media type to use when none is specified
 | returnBodyOnCreate | change if a body should be returned on creating a new entity
-| returnBodyOnupdate | change if a body should be returned on updating an entity
+| returnBodyOnUpdate | change if a body should be returned on updating an entity
 |===
 
 [[getting-started.bootstrap]]

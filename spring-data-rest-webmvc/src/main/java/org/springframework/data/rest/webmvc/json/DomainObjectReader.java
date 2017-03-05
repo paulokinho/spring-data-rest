@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2016 the original author or authors.
+ * Copyright 2014-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,30 +15,41 @@
  */
 package org.springframework.data.rest.webmvc.json;
 
+import lombok.Getter;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 import java.io.InputStream;
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import org.springframework.beans.PropertyAccessor;
+import org.springframework.beans.PropertyAccessorFactory;
+import org.springframework.core.CollectionFactory;
+import org.springframework.core.convert.support.DefaultConversionService;
+import org.springframework.data.mapping.Association;
 import org.springframework.data.mapping.PersistentEntity;
 import org.springframework.data.mapping.PersistentProperty;
 import org.springframework.data.mapping.PersistentPropertyAccessor;
+import org.springframework.data.mapping.SimpleAssociationHandler;
 import org.springframework.data.mapping.SimplePropertyHandler;
 import org.springframework.data.mapping.context.PersistentEntities;
+import org.springframework.data.mapping.model.ConvertingPropertyAccessor;
 import org.springframework.data.rest.webmvc.mapping.Associations;
+import org.springframework.data.util.ClassTypeInformation;
+import org.springframework.data.util.TypeInformation;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.util.Assert;
+import org.springframework.util.ObjectUtils;
 
-import com.fasterxml.jackson.databind.BeanDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.introspect.BasicClassIntrospector;
-import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
-import com.fasterxml.jackson.databind.introspect.ClassIntrospector;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
@@ -47,6 +58,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * detect nested objects, lookup the original value and apply the merge recursively.
  * 
  * @author Oliver Gierke
+ * @author Mark Paluch
+ * @author Craig Andrews
+ * @author Mathias Düsterhöft
  * @since 2.2
  */
 @RequiredArgsConstructor
@@ -54,12 +68,11 @@ public class DomainObjectReader {
 
 	private final @NonNull PersistentEntities entities;
 	private final @NonNull Associations associationLinks;
-	private final @NonNull ClassIntrospector introspector = new BasicClassIntrospector();
 
 	/**
 	 * Reads the given input stream into an {@link ObjectNode} and applies that to the given existing instance.
 	 * 
-	 * @param request must not be {@literal null}.
+	 * @param source must not be {@literal null}.
 	 * @param target must not be {@literal null}.
 	 * @param mapper must not be {@literal null}.
 	 * @return
@@ -85,6 +98,7 @@ public class DomainObjectReader {
 	 * @param mapper
 	 * @return
 	 */
+	@SuppressWarnings("unchecked")
 	public <T> T readPut(final ObjectNode source, T target, final ObjectMapper mapper) {
 
 		Assert.notNull(source, "ObjectNode must not be null!");
@@ -97,33 +111,81 @@ public class DomainObjectReader {
 
 		Assert.notNull(entity, "No PersistentEntity found for ".concat(type.getName()).concat("!"));
 
-		final MappedProperties properties = getJacksonProperties(entity, mapper);
+		try {
 
-		entity.doWithProperties(new SimplePropertyHandler() {
+			Object intermediate = mapper.readerFor(target.getClass()).readValue(source);
+			return (T) mergeForPut(intermediate, target, mapper);
 
-			/*
-			 * (non-Javadoc)
-			 * @see org.springframework.data.mapping.SimplePropertyHandler#doWithPersistentProperty(org.springframework.data.mapping.PersistentProperty)
-			 */
-			@Override
-			public void doWithPersistentProperty(PersistentProperty<?> property) {
+		} catch (Exception o_O) {
+			throw new HttpMessageNotReadableException("Could not read payload!", o_O);
+		}
+	}
 
-				if (property.isIdProperty() || property.isVersionProperty() || !property.isWritable()) {
-					return;
-				}
+	/**
+	 * Merges the state of given source object onto the target one preserving PUT semantics.
+	 * 
+	 * @param source can be {@literal null}.
+	 * @param target can be {@literal null}.
+	 * @param mapper must not be {@literal null}.
+	 * @return
+	 */
+	<T> T mergeForPut(T source, T target, final ObjectMapper mapper) {
 
-				String mappedName = properties.getMappedName(property);
+		Assert.notNull(mapper, "ObjectMapper must not be null!");
 
-				boolean isMappedProperty = mappedName != null;
-				boolean noValueInSource = !source.has(mappedName);
+		if (target == null || source == null) {
+			return source;
+		}
 
-				if (isMappedProperty && noValueInSource) {
-					source.putNull(mappedName);
-				}
+		Class<? extends Object> type = target.getClass();
+
+		PersistentEntity<?, ?> entity = entities.getPersistentEntity(type);
+
+		if (entity == null) {
+			return source;
+		}
+
+		Assert.notNull(entity, "No PersistentEntity found for ".concat(type.getName()).concat("!"));
+
+		MergingPropertyHandler propertyHandler = new MergingPropertyHandler(source, target, entity, mapper);
+
+		entity.doWithProperties(propertyHandler);
+		entity.doWithAssociations(new LinkedAssociationSkippingAssociationHandler(associationLinks, propertyHandler));
+
+		// Need to copy unmapped properties as the PersistentProperty model currently does not contain any transient
+		// properties
+		copyRemainingProperties(propertyHandler.getProperties(), source, target);
+
+		return target;
+	}
+
+	/**
+	 * Copies the unmapped properties of the given {@link MappedProperties} from the source object to the target instance.
+	 * 
+	 * @param properties must not be {@literal null}.
+	 * @param source must not be {@literal null}.
+	 * @param target must not be {@literal null}.
+	 */
+	private static void copyRemainingProperties(MappedProperties properties, Object source, Object target) {
+
+		PropertyAccessor sourceFieldAccessor = PropertyAccessorFactory.forDirectFieldAccess(source);
+		PropertyAccessor sourcePropertyAccessor = PropertyAccessorFactory.forBeanPropertyAccess(source);
+		PropertyAccessor targetFieldAccessor = PropertyAccessorFactory.forDirectFieldAccess(target);
+		PropertyAccessor targetPropertyAccessor = PropertyAccessorFactory.forBeanPropertyAccess(target);
+
+		for (String property : properties.getSpringDataUnmappedProperties()) {
+
+			// If there's a field we can just copy it.
+			if (targetFieldAccessor.isWritableProperty(property)) {
+				targetFieldAccessor.setPropertyValue(property, sourceFieldAccessor.getPropertyValue(property));
+				continue;
 			}
-		});
 
-		return merge(source, target, mapper);
+			// Otherwise only copy if there's both a getter and setter.
+			if (targetPropertyAccessor.isWritableProperty(property) && sourcePropertyAccessor.isReadableProperty(property)) {
+				targetPropertyAccessor.setPropertyValue(property, sourcePropertyAccessor.getPropertyValue(property));
+			}
+		}
 	}
 
 	public <T> T merge(ObjectNode source, T target, ObjectMapper mapper) {
@@ -144,7 +206,8 @@ public class DomainObjectReader {
 	 * @return
 	 * @throws Exception
 	 */
-	private <T> T doMerge(ObjectNode root, T target, ObjectMapper mapper) throws Exception {
+	@SuppressWarnings("unchecked")
+	<T> T doMerge(ObjectNode root, T target, ObjectMapper mapper) throws Exception {
 
 		Assert.notNull(root, "Root ObjectNode must not be null!");
 		Assert.notNull(target, "Target object instance must not be null!");
@@ -156,34 +219,40 @@ public class DomainObjectReader {
 			return mapper.readerForUpdating(target).readValue(root);
 		}
 
-		MappedProperties mappedProperties = getJacksonProperties(entity, mapper);
+		MappedProperties mappedProperties = MappedProperties.fromJacksonProperties(entity, mapper);
 
 		for (Iterator<Entry<String, JsonNode>> i = root.fields(); i.hasNext();) {
 
 			Entry<String, JsonNode> entry = i.next();
 			JsonNode child = entry.getValue();
-
-			if (child.isArray()) {
-				continue;
-			}
-
 			String fieldName = entry.getKey();
 
 			if (!mappedProperties.hasPersistentPropertyForField(fieldName)) {
-				i.remove();
+				continue;
+			}
+
+			PersistentProperty<?> property = mappedProperties.getPersistentProperty(fieldName);
+			PersistentPropertyAccessor accessor = entity.getPropertyAccessor(target);
+			Object rawValue = accessor.getProperty(property);
+
+			if (rawValue == null) {
+				continue;
+			}
+
+			if (child.isArray()) {
+
+				if (handleArray(child, rawValue, mapper, property.getTypeInformation())) {
+					i.remove();
+				}
+
 				continue;
 			}
 
 			if (child.isObject()) {
 
-				PersistentProperty<?> property = mappedProperties.getPersistentProperty(fieldName);
-
 				if (associationLinks.isLinkableAssociation(property)) {
 					continue;
 				}
-
-				PersistentPropertyAccessor accessor = entity.getPropertyAccessor(target);
-				Object nested = accessor.getProperty(property);
 
 				ObjectNode objectNode = (ObjectNode) child;
 
@@ -194,7 +263,7 @@ public class DomainObjectReader {
 						continue;
 					}
 
-					doMergeNestedMap((Map<String, Object>) nested, objectNode, mapper);
+					doMergeNestedMap((Map<Object, Object>) rawValue, objectNode, mapper, property.getTypeInformation());
 
 					// Remove potentially emptied Map as values have been handled recursively
 					if (!objectNode.fieldNames().hasNext()) {
@@ -204,13 +273,89 @@ public class DomainObjectReader {
 					continue;
 				}
 
-				if (nested != null && property.isEntity()) {
-					doMerge(objectNode, nested, mapper);
+				if (property.isEntity()) {
+					i.remove();
+					doMerge(objectNode, rawValue, mapper);
 				}
 			}
 		}
 
 		return mapper.readerForUpdating(target).readValue(root);
+	}
+
+	/**
+	 * Handles the given {@link JsonNode} by treating it as {@link ArrayNode} and the given source value as
+	 * {@link Collection}-like value. Looks up the actual type to handle from the potentially available first element,
+	 * falling back to component type lookup on the given type.
+	 * 
+	 * @param node must not be {@literal null}.
+	 * @param source must not be {@literal null}.
+	 * @param mapper must not be {@literal null}.
+	 * @param collectionType must not be {@literal null}.
+	 * @return
+	 * @throws Exception
+	 */
+	private boolean handleArray(JsonNode node, Object source, ObjectMapper mapper, TypeInformation<?> collectionType)
+			throws Exception {
+
+		Collection<Object> collection = ifCollection(source);
+
+		if (collection == null) {
+			return false;
+		}
+
+		return handleArrayNode((ArrayNode) node, collection, mapper, collectionType.getComponentType());
+	}
+
+	/**
+	 * Applies the diff handling to {@link ArrayNode}s, potentially recursing into nested ones.
+	 * 
+	 * @param array the source {@link ArrayNode}m, must not be {@literal null}.
+	 * @param collection the actual collection values, must not be {@literal null}.
+	 * @param mapper the {@link ObjectMapper} to use, must not be {@literal null}.
+	 * @param componentType the item type of the collection, can be {@literal null}.
+	 * @return whether an object merge has been applied to the {@link ArrayNode}.
+	 */
+	private boolean handleArrayNode(ArrayNode array, Collection<Object> collection, ObjectMapper mapper,
+			TypeInformation<?> componentType) throws Exception {
+
+		Assert.notNull(array, "ArrayNode must not be null!");
+		Assert.notNull(collection, "Source collection must not be null!");
+		Assert.notNull(mapper, "ObjectMapper must not be null!");
+
+		// We need an iterator for the original collection.
+		// We might modify it but we want to keep iterating over the original collection.
+		Iterator<Object> value = new ArrayList<Object>(collection).iterator();
+		boolean nestedObjectFound = false;
+
+		for (JsonNode jsonNode : array) {
+
+			if (!value.hasNext()) {
+
+				collection.add(mapper.treeToValue(jsonNode, getTypeToMap(null, componentType).getType()));
+
+				continue;
+			}
+
+			Object next = value.next();
+
+			if (ArrayNode.class.isInstance(jsonNode)) {
+				return handleArray(jsonNode, next, mapper, getTypeToMap(value, componentType));
+			}
+
+			if (ObjectNode.class.isInstance(jsonNode)) {
+
+				nestedObjectFound = true;
+				doMerge((ObjectNode) jsonNode, next, mapper);
+			}
+		}
+
+		// there are more items in the collection than contained in the JSON node - remove it.
+		while (value.hasNext()) {
+			collection.remove(value.next());
+		}
+
+		return nestedObjectFound;
 	}
 
 	/**
@@ -221,83 +366,297 @@ public class DomainObjectReader {
 	 * @param mapper must not be {@literal null}.
 	 * @throws Exception
 	 */
-	private void doMergeNestedMap(Map<String, Object> source, ObjectNode node, ObjectMapper mapper) throws Exception {
+	private void doMergeNestedMap(Map<Object, Object> source, ObjectNode node, ObjectMapper mapper,
+			TypeInformation<?> type) throws Exception {
 
 		if (source == null) {
 			return;
 		}
 
 		Iterator<Entry<String, JsonNode>> fields = node.fields();
+		Class<?> keyType = typeOrObject(type.getComponentType());
+		TypeInformation<?> valueType = type.getMapValueType();
 
 		while (fields.hasNext()) {
 
 			Entry<String, JsonNode> entry = fields.next();
-			JsonNode child = entry.getValue();
-			Object sourceValue = source.get(entry.getKey());
+			JsonNode value = entry.getValue();
+			String key = entry.getKey();
 
-			if (child instanceof ObjectNode && sourceValue != null) {
-				doMerge((ObjectNode) child, sourceValue, mapper);
-				fields.remove();
+			Object mappedKey = mapper.readValue(quote(key), keyType);
+			Object sourceValue = source.get(mappedKey);
+			TypeInformation<?> typeToMap = getTypeToMap(sourceValue, valueType);
+
+			if (value instanceof ObjectNode && sourceValue != null) {
+
+				doMerge((ObjectNode) value, sourceValue, mapper);
+
+			} else if (value instanceof ArrayNode && sourceValue != null) {
+
+				handleArray(value, sourceValue, mapper, getTypeToMap(sourceValue, typeToMap));
+
+			} else {
+
+				source.put(mappedKey, mapper.treeToValue(value, typeToMap.getType()));
 			}
+
+			fields.remove();
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private Map<Object, Object> mergeMaps(PersistentProperty<?> property, Object source, Object target,
+			ObjectMapper mapper) {
+
+		Map<Object, Object> sourceMap = (Map<Object, Object>) source;
+
+		if (sourceMap == null) {
+			return null;
+		}
+
+		Map<Object, Object> targetMap = (Map<Object, Object>) target;
+		Map<Object, Object> result = targetMap == null ? CollectionFactory.createMap(Map.class, sourceMap.size())
+				: CollectionFactory.createApproximateMap(targetMap, sourceMap.size());
+
+		for (Entry<Object, Object> entry : sourceMap.entrySet()) {
+
+			Object targetValue = targetMap == null ? null : targetMap.get(entry.getKey());
+			result.put(entry.getKey(), mergeForPut(entry.getValue(), targetValue, mapper));
+		}
+
+		if (targetMap == null) {
+			return result;
+		}
+
+		try {
+
+			targetMap.clear();
+			targetMap.putAll(result);
+
+			return targetMap;
+
+		} catch (UnsupportedOperationException o_O) {
+			return result;
+		}
+	}
+
+	private Collection<Object> mergeCollections(PersistentProperty<?> property, Object source, Object target,
+			ObjectMapper mapper) {
+
+		Collection<Object> sourceCollection = asCollection(source);
+
+		if (sourceCollection == null) {
+			return null;
+		}
+
+		Collection<Object> targetCollection = asCollection(target);
+		Collection<Object> result = targetCollection == null
+				? CollectionFactory.createCollection(Collection.class, sourceCollection.size())
+				: CollectionFactory.createApproximateCollection(targetCollection, sourceCollection.size());
+
+		Iterator<Object> sourceIterator = sourceCollection.iterator();
+		Iterator<Object> targetIterator = targetCollection == null ? Collections.emptyIterator()
+				: targetCollection.iterator();
+
+		while (sourceIterator.hasNext()) {
+
+			Object sourceElement = sourceIterator.next();
+			Object targetElement = targetIterator.hasNext() ? targetIterator.next() : null;
+
+			result.add(mergeForPut(sourceElement, targetElement, mapper));
+		}
+
+		if (targetCollection == null) {
+			return result;
+		}
+
+		try {
+
+			targetCollection.clear();
+			targetCollection.addAll(result);
+
+			return targetCollection;
+
+		} catch (UnsupportedOperationException o_O) {
+			return result;
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private static Collection<Object> asCollection(Object source) {
+
+		if (source == null) {
+			return null;
+		} else if (source instanceof Collection) {
+			return (Collection<Object>) source;
+		} else if (source.getClass().isArray()) {
+			return Arrays.asList(ObjectUtils.toObjectArray(source));
+		} else {
+			return Collections.singleton(source);
 		}
 	}
 
 	/**
-	 * Returns the {@link MappedProperties} for the given {@link PersistentEntity}.
+	 * Returns the given source instance as {@link Collection} or creates a new one for the given type.
 	 * 
-	 * @param entity must not be {@literal null}.
-	 * @param mapper must not be {@literal null}.
+	 * @param source can be {@literal null}.
+	 * @param type must not be {@literal null} in case {@code source} is null.
 	 * @return
 	 */
-	private MappedProperties getJacksonProperties(PersistentEntity<?, ?> entity, ObjectMapper mapper) {
+	@SuppressWarnings("unchecked")
+	private static Collection<Object> ifCollection(Object source) {
 
-		BeanDescription description = introspector.forDeserialization(mapper.getDeserializationConfig(),
-				mapper.constructType(entity.getType()), mapper.getDeserializationConfig());
+		Assert.notNull(source, "Source instance must not be null!");
 
-		return new MappedProperties(entity, description);
+		if (source instanceof Collection) {
+			return (Collection<Object>) source;
+		}
+
+		if (source.getClass().isArray()) {
+			return Arrays.asList((Object[]) source);
+		}
+
+		return null;
 	}
 
 	/**
-	 * Simple value object to capture a mapping of Jackson mapped field names and {@link PersistentProperty} instances.
-	 *
+	 * Surrounds the given source {@link String} with quotes so that they represent a valid JSON String.
+	 * 
+	 * @param source can be {@literal null}.
+	 * @return
+	 */
+	private static String quote(String source) {
+		return source == null ? null : "\"".concat(source).concat("\"");
+	}
+
+	/**
+	 * Returns the raw type of the given {@link TypeInformation} or {@link Object} as fallback.
+	 * 
+	 * @param type can be {@literal null}.
+	 * @return
+	 */
+	private static Class<?> typeOrObject(TypeInformation<?> type) {
+		return type == null ? Object.class : type.getType();
+	}
+
+	/**
+	 * Returns the type to read for the given value and default type. The type will be defaulted to {@link Object} if
+	 * missing. If the given value's type is different from the given default (i.e. more concrete) the value's type will
+	 * be used.
+	 * 
+	 * @param value can be {@literal null}.
+	 * @param type can be {@literal null}.
+	 * @return
+	 */
+	private static TypeInformation<?> getTypeToMap(Object value, TypeInformation<?> type) {
+
+		if (type == null) {
+			type = ClassTypeInformation.OBJECT;
+		}
+
+		if (value == null) {
+			return type;
+		}
+
+		if (Enum.class.isInstance(value)) {
+			return ClassTypeInformation.from(((Enum<?>) value).getDeclaringClass());
+		}
+
+		return value.getClass().equals(type.getType()) ? type : ClassTypeInformation.from(value.getClass());
+	}
+
+	/**
+	 * {@link SimpleAssociationHandler} that skips linkable associations and forwards handling for all other ones to the
+	 * delegate {@link SimplePropertyHandler}.
+	 * 
 	 * @author Oliver Gierke
 	 */
-	private static class MappedProperties {
+	@RequiredArgsConstructor
+	private final class LinkedAssociationSkippingAssociationHandler implements SimpleAssociationHandler {
 
-		private final Map<PersistentProperty<?>, String> propertyToFieldName;
-		private final Map<String, PersistentProperty<?>> fieldNameToProperty;
+		private final @NonNull Associations associations;
+		private final @NonNull SimplePropertyHandler delegate;
+
+		/*
+		 * (non-Javadoc)
+		 * @see org.springframework.data.mapping.SimpleAssociationHandler#doWithAssociation(org.springframework.data.mapping.Association)
+		 */
+		@Override
+		public void doWithAssociation(Association<? extends PersistentProperty<?>> association) {
+
+			if (associationLinks.isLinkableAssociation(association)) {
+				return;
+			}
+
+			delegate.doWithPersistentProperty(association.getInverse());
+		}
+	}
+
+	/**
+	 * {@link SimplePropertyHandler} to merge the states of the given objects.
+	 * 
+	 * @author Oliver Gierke
+	 */
+	private class MergingPropertyHandler implements SimplePropertyHandler {
+
+		private final @Getter MappedProperties properties;
+		private final PersistentPropertyAccessor targetAccessor;
+		private final PersistentPropertyAccessor sourceAccessor;
+		private final ObjectMapper mapper;
 
 		/**
-		 * Creates a new {@link MappedProperties} instance for the given {@link PersistentEntity} and
-		 * {@link BeanDescription}.
+		 * Creates a new {@link MergingPropertyHandler} for the given source, target, {@link PersistentEntity} and
+		 * {@link ObjectMapper}.
 		 * 
+		 * @param source must not be {@literal null}.
+		 * @param target must not be {@literal null}.
 		 * @param entity must not be {@literal null}.
-		 * @param description must not be {@literal null}.
+		 * @param mapper must not be {@literal null}.
 		 */
-		public MappedProperties(PersistentEntity<?, ?> entity, BeanDescription description) {
+		public MergingPropertyHandler(Object source, Object target, PersistentEntity<?, ?> entity, ObjectMapper mapper) {
 
-			this.propertyToFieldName = new HashMap<PersistentProperty<?>, String>();
-			this.fieldNameToProperty = new HashMap<String, PersistentProperty<?>>();
+			Assert.notNull(source, "Source instance must not be null!");
+			Assert.notNull(target, "Target instance must not be null!");
+			Assert.notNull(entity, "PersistentEntity must not be null!");
+			Assert.notNull(mapper, "ObjectMapper must not be null!");
 
-			for (BeanPropertyDefinition property : description.findProperties()) {
+			this.properties = MappedProperties.fromJacksonProperties(entity, mapper);
+			this.targetAccessor = new ConvertingPropertyAccessor(entity.getPropertyAccessor(target),
+					new DefaultConversionService());
+			this.sourceAccessor = entity.getPropertyAccessor(source);
+			this.mapper = mapper;
+		}
 
-				PersistentProperty<?> persistentProperty = entity.getPersistentProperty(property.getInternalName());
+		/*
+		 * (non-Javadoc)
+		 * @see org.springframework.data.mapping.SimplePropertyHandler#doWithPersistentProperty(org.springframework.data.mapping.PersistentProperty)
+		 */
+		@Override
+		public void doWithPersistentProperty(PersistentProperty<?> property) {
 
-				propertyToFieldName.put(persistentProperty, property.getName());
-				fieldNameToProperty.put(property.getName(), persistentProperty);
+			if (property.isIdProperty() || property.isVersionProperty() || !property.isWritable()) {
+				return;
 			}
-		}
 
-		public String getMappedName(PersistentProperty<?> property) {
-			return propertyToFieldName.get(property);
-		}
+			if (!properties.isMappedProperty(property)) {
+				return;
+			}
 
-		public boolean hasPersistentPropertyForField(String fieldName) {
-			return fieldNameToProperty.containsKey(fieldName);
-		}
+			Object sourceValue = sourceAccessor.getProperty(property);
+			Object targetValue = targetAccessor.getProperty(property);
+			Object result = null;
 
-		public PersistentProperty<?> getPersistentProperty(String fieldName) {
-			return fieldNameToProperty.get(fieldName);
+			if (property.isMap()) {
+				result = mergeMaps(property, sourceValue, targetValue, mapper);
+			} else if (property.isCollectionLike()) {
+				result = mergeCollections(property, sourceValue, targetValue, mapper);
+			} else if (property.isEntity()) {
+				result = mergeForPut(sourceValue, targetValue, mapper);
+			} else {
+				result = sourceValue;
+			}
+
+			targetAccessor.setProperty(property, result);
 		}
 	}
 }

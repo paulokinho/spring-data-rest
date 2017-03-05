@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2016 the original author or authors.
+ * Copyright 2013-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ import org.springframework.hateoas.PagedResources;
 import org.springframework.hateoas.ResourceSupport;
 import org.springframework.hateoas.Resources;
 import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ContextConfiguration;
@@ -100,8 +101,8 @@ public class RepositorySearchControllerIntegrationTests extends AbstractControll
 		MultiValueMap<String, Object> parameters = new LinkedMultiValueMap<String, Object>(1);
 		parameters.add("firstname", "John");
 
-		ResponseEntity<Object> response = controller.executeSearch(resourceInformation, parameters, "firstname", PAGEABLE,
-				null, assembler);
+		ResponseEntity<?> response = controller.executeSearch(resourceInformation, parameters, "firstname", PAGEABLE, null,
+				assembler, new HttpHeaders());
 
 		ResourceTester tester = ResourceTester.of(response.getBody());
 		PagedResources<Object> pagedResources = tester.assertIsPage();
@@ -111,66 +112,42 @@ public class RepositorySearchControllerIntegrationTests extends AbstractControll
 		tester.withContentResource(new HasSelfLink(BASE.slash(metadata.getPath()).slash("{id}")));
 	}
 
-	/**
-	 * @see DATAREST-330
-	 */
-	@Test(expected = ResourceNotFoundException.class)
+	@Test(expected = ResourceNotFoundException.class) // DATAREST-330
 	public void doesNotExposeHeadForSearchResourceIfResourceDoesnHaveSearches() {
 		controller.headForSearches(getResourceInformation(Author.class));
 	}
 
-	/**
-	 * @see DATAREST-330
-	 */
-	@Test(expected = ResourceNotFoundException.class)
+	@Test(expected = ResourceNotFoundException.class) // DATAREST-330
 	public void exposesHeadForSearchResourceIfResourceIsNotExposed() {
 		controller.headForSearches(getResourceInformation(CreditCard.class));
 	}
 
-	/**
-	 * @see DATAREST-330
-	 */
-	@Test
+	@Test // DATAREST-330
 	public void exposesHeadForSearchResourceIfResourceIsExposed() {
 		controller.headForSearches(getResourceInformation(Person.class));
 	}
 
-	/**
-	 * @see DATAREST-330
-	 */
-	@Test
+	@Test // DATAREST-330
 	public void exposesHeadForExistingQueryMethodResource() {
 		controller.headForSearch(getResourceInformation(Person.class), "findByCreatedUsingISO8601Date");
 	}
 
-	/**
-	 * @see DATAREST-330
-	 */
-	@Test(expected = ResourceNotFoundException.class)
+	@Test(expected = ResourceNotFoundException.class) // DATAREST-330
 	public void doesNotExposeHeadForInvalidQueryMethodResource() {
 		controller.headForSearch(getResourceInformation(Person.class), "foobar");
 	}
 
-	/**
-	 * @see DATAREST-333
-	 */
-	@Test
+	@Test // DATAREST-333
 	public void searchResourceSupportsGetOnly() {
 		assertAllowHeaders(controller.optionsForSearches(getResourceInformation(Person.class)), HttpMethod.GET);
 	}
 
-	/**
-	 * @see DATAREST-333
-	 */
-	@Test(expected = ResourceNotFoundException.class)
+	@Test(expected = ResourceNotFoundException.class) // DATAREST-333
 	public void returns404ForOptionsForRepositoryWithoutSearches() {
 		controller.optionsForSearches(getResourceInformation(Address.class));
 	}
 
-	/**
-	 * @see DATAREST-333
-	 */
-	@Test
+	@Test // DATAREST-333
 	public void queryMethodResourceSupportsGetOnly() {
 
 		RootResourceInformation resourceInformation = getResourceInformation(Person.class);
@@ -179,10 +156,7 @@ public class RepositorySearchControllerIntegrationTests extends AbstractControll
 		assertAllowHeaders(response, HttpMethod.GET);
 	}
 
-	/**
-	 * @see DATAREST-502
-	 */
-	@Test
+	@Test // DATAREST-502
 	public void interpretsUriAsReferenceToRelatedEntity() {
 
 		MultiValueMap<String, Object> parameters = new LinkedMultiValueMap<String, Object>(1);
@@ -190,16 +164,13 @@ public class RepositorySearchControllerIntegrationTests extends AbstractControll
 
 		RootResourceInformation resourceInformation = getResourceInformation(Book.class);
 
-		ResponseEntity<Object> result = controller.executeSearch(resourceInformation, parameters, "findByAuthorsContains",
-				PAGEABLE, null, assembler);
+		ResponseEntity<?> result = controller.executeSearch(resourceInformation, parameters, "findByAuthorsContains",
+				PAGEABLE, null, assembler, new HttpHeaders());
 
 		assertThat(result.getBody(), is(instanceOf(Resources.class)));
 	}
 
-	/**
-	 * @see DATAREST-515
-	 */
-	@Test
+	@Test // DATAREST-515
 	public void repositorySearchResourceExposesDomainType() {
 
 		RepositorySearchesResource searches = controller.listSearches(getResourceInformation(Person.class));

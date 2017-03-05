@@ -15,11 +15,17 @@
  */
 package org.springframework.data.rest.webmvc.jpa;
 
+import static org.springframework.web.bind.annotation.RequestMethod.*;
+
 import org.springframework.data.repository.CrudRepository;
+import org.springframework.web.bind.annotation.CrossOrigin;
 
 /**
  * @author Oliver Gierke
+ * @author Mark Paluch
  */
-public interface AuthorRepository extends CrudRepository<Author, Long> {
-
-}
+@CrossOrigin(origins = "http://not.so.far.away", //
+		allowCredentials = "true", //
+		methods = { GET, PATCH }, //
+		maxAge = 1234)
+public interface AuthorRepository extends CrudRepository<Author, Long> {}

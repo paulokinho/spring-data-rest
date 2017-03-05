@@ -23,12 +23,20 @@ import java.util.UUID;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Reference;
+import org.springframework.data.rest.core.config.Projection;
+import org.springframework.data.rest.tests.shop.LineItem.LineItemProductsOnlyProjection;
 
 /**
  * @author Oliver Gierke
+ * @author Craig Andrews
  */
 @Value
 public class Order {
+
+	@Projection(name = "itemsOnly", types = Order.class)
+	public interface OrderItemsOnlyProjection {
+		List<LineItemProductsOnlyProjection> getItems();
+	}
 
 	private final @Id UUID id = UUID.randomUUID();
 	private final List<LineItem> items = new ArrayList<>();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2015 the original author or authors.
+ * Copyright 2013-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.repository.support.Repositories;
 import org.springframework.data.rest.core.config.EnumTranslationConfiguration;
 import org.springframework.data.rest.core.config.MetadataConfiguration;
 import org.springframework.data.rest.core.config.ProjectionDefinitionConfiguration;
@@ -41,7 +42,7 @@ import org.springframework.web.method.HandlerMethod;
 
 /**
  * Unit tests for {@link RepositoryRestHandlerMapping}.
- * 
+ *
  * @author Oliver Gierke
  * @author Greg Turnquist
  */
@@ -57,6 +58,7 @@ public class RepositoryRestHandlerMappingUnitTests {
 	}
 
 	@Mock ResourceMappings mappings;
+	@Mock Repositories repositories;
 
 	RepositoryRestConfiguration configuration;
 	RepositoryRestHandlerMapping handlerMapping;
@@ -69,7 +71,7 @@ public class RepositoryRestHandlerMappingUnitTests {
 		configuration = new RepositoryRestConfiguration(new ProjectionDefinitionConfiguration(),
 				new MetadataConfiguration(), mock(EnumTranslationConfiguration.class));
 
-		handlerMapping = new RepositoryRestHandlerMapping(mappings, configuration);
+		handlerMapping = new RepositoryRestHandlerMapping(mappings, configuration, repositories);
 		handlerMapping.setApplicationContext(CONTEXT);
 
 		mockRequest = new MockHttpServletRequest();
@@ -89,20 +91,14 @@ public class RepositoryRestHandlerMappingUnitTests {
 		new RepositoryRestHandlerMapping(mappings, null);
 	}
 
-	/**
-	 * @see DATAREST-111
-	 */
-	@Test
+	@Test // DATAREST-111
 	public void returnsNullForUriNotMapped() throws Exception {
 
 		handlerMapping.afterPropertiesSet();
 		assertThat(handlerMapping.lookupHandlerMethod("/foo", mockRequest), is(nullValue()));
 	}
 
-	/**
-	 * @see DATAREST-111
-	 */
-	@Test
+	@Test // DATAREST-111
 	public void looksUpRepositoryEntityControllerMethodCorrectly() throws Exception {
 
 		when(mappings.exportsTopLevelResourceFor("/people")).thenReturn(true);
@@ -115,10 +111,7 @@ public class RepositoryRestHandlerMappingUnitTests {
 		assertThat(method.getMethod(), is(listEntitiesMethod));
 	}
 
-	/**
-	 * @see DATAREST-292
-	 */
-	@Test
+	@Test // DATAREST-292
 	public void returnsRepositoryHandlerMethodWithBaseUriConfigured() throws Exception {
 
 		when(mappings.exportsTopLevelResourceFor("/people")).thenReturn(true);
@@ -133,10 +126,7 @@ public class RepositoryRestHandlerMappingUnitTests {
 		assertThat(method.getMethod(), is(listEntitiesMethod));
 	}
 
-	/**
-	 * @see DATAREST-292
-	 */
-	@Test
+	@Test // DATAREST-292
 	public void returnsRootHandlerMethodWithBaseUriConfigured() throws Exception {
 
 		when(mappings.exportsTopLevelResourceFor("/people")).thenReturn(true);
@@ -151,10 +141,7 @@ public class RepositoryRestHandlerMappingUnitTests {
 		assertThat(method.getMethod(), is(rootHandlerMethod));
 	}
 
-	/**
-	 * @see DATAREST-276
-	 */
-	@Test
+	@Test // DATAREST-276
 	public void returnsRepositoryHandlerMethodForAbsoluteBaseUri() throws Exception {
 
 		when(mappings.exportsTopLevelResourceFor("/people")).thenReturn(true);
@@ -169,10 +156,7 @@ public class RepositoryRestHandlerMappingUnitTests {
 		assertThat(method.getMethod(), is(listEntitiesMethod));
 	}
 
-	/**
-	 * @see DATAREST-276
-	 */
-	@Test
+	@Test // DATAREST-276
 	public void returnsRepositoryHandlerMethodForAbsoluteBaseUriWithServletMapping() throws Exception {
 
 		when(mappings.exportsTopLevelResourceFor("/people")).thenReturn(true);
@@ -188,10 +172,7 @@ public class RepositoryRestHandlerMappingUnitTests {
 		assertThat(method.getMethod(), is(listEntitiesMethod));
 	}
 
-	/**
-	 * @see DATAREST-276
-	 */
-	@Test
+	@Test // DATAREST-276
 	public void refrainsFromMappingIfTheRequestDoesNotPointIntoAbsolutelyDefinedUriSpace() throws Exception {
 
 		when(mappings.exportsTopLevelResourceFor("/people")).thenReturn(true);
@@ -205,10 +186,7 @@ public class RepositoryRestHandlerMappingUnitTests {
 		assertThat(method, is(nullValue()));
 	}
 
-	/**
-	 * @see DATAREST-276
-	 */
-	@Test
+	@Test // DATAREST-276
 	public void refrainsFromMappingWhenUrisDontMatch() throws Exception {
 
 		String baseUri = "foo";
@@ -225,10 +203,7 @@ public class RepositoryRestHandlerMappingUnitTests {
 		assertThat(method, is(nullValue()));
 	}
 
-	/**
-	 * @see DATAREST-609
-	 */
-	@Test
+	@Test // DATAREST-609
 	public void rejectsUnexpandedUriTemplateWithNotFound() throws Exception {
 
 		when(mappings.exportsTopLevelResourceFor("/people")).thenReturn(true);
@@ -236,5 +211,10 @@ public class RepositoryRestHandlerMappingUnitTests {
 		mockRequest = new MockHttpServletRequest("GET", "/people{?projection}");
 
 		assertThat(handlerMapping.getHandler(mockRequest), is(nullValue()));
+	}
+
+	@Test // DATAREST-994
+	public void twoArgumentConstructorDoesNotThrowException() {
+		new RepositoryRestHandlerMapping(mappings, configuration);
 	}
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,12 +31,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.support.MessageSourceAccessor;
 import org.springframework.context.support.StaticMessageSource;
+import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
 import org.springframework.data.mapping.PersistentEntity;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
 import org.springframework.data.repository.support.Repositories;
 import org.springframework.data.rest.webmvc.PersistentEntityResource;
 import org.springframework.data.rest.webmvc.jpa.CreditCard;
+import org.springframework.data.rest.webmvc.jpa.Dinner;
+import org.springframework.data.rest.webmvc.jpa.Guest;
 import org.springframework.data.rest.webmvc.jpa.JpaRepositoryConfig;
 import org.springframework.data.rest.webmvc.jpa.LineItem;
 import org.springframework.data.rest.webmvc.jpa.Order;
@@ -44,6 +47,7 @@ import org.springframework.data.rest.webmvc.jpa.OrderRepository;
 import org.springframework.data.rest.webmvc.jpa.Person;
 import org.springframework.data.rest.webmvc.jpa.PersonRepository;
 import org.springframework.data.rest.webmvc.jpa.PersonSummary;
+import org.springframework.data.rest.webmvc.jpa.Suite;
 import org.springframework.data.rest.webmvc.jpa.UserExcerpt;
 import org.springframework.data.rest.webmvc.util.TestUtils;
 import org.springframework.hateoas.Link;
@@ -71,6 +75,7 @@ import com.jayway.jsonpath.JsonPath;
  * @author Jon Brisbin
  * @author Greg Turnquist
  * @author Oliver Gierke
+ * @author Alex Leigh
  */
 @RunWith(SpringJUnit4ClassRunner.class)
 @ContextConfiguration(classes = { JpaRepositoryConfig.class, PersistentEntitySerializationTests.TestConfig.class })
@@ -83,6 +88,7 @@ public class PersistentEntitySerializationTests {
 	@Autowired Repositories repositories;
 	@Autowired PersonRepository people;
 	@Autowired OrderRepository orders;
+	@Autowired JpaMetamodelMappingContext context;
 
 	@Configuration
 	static class TestConfig extends RepositoryTestsConfig {
@@ -120,10 +126,7 @@ public class PersistentEntitySerializationTests {
 		assertThat(p.getSiblings(), is(Collections.EMPTY_LIST));
 	}
 
-	/**
-	 * @see DATAREST-238
-	 */
-	@Test
+	@Test // DATAREST-238
 	public void deserializePersonWithLinks() throws IOException {
 
 		String bilbo = "{\n" + "  \"_links\" : {\n" + "    \"self\" : {\n"
@@ -138,10 +141,7 @@ public class PersistentEntitySerializationTests {
 		assertThat(p.getLastName(), equalTo("Baggins"));
 	}
 
-	/**
-	 * @see DATAREST-238
-	 */
-	@Test
+	@Test // DATAREST-238
 	public void serializesPersonEntity() throws IOException, InterruptedException {
 
 		PersistentEntity<?, ?> persistentEntity = repositories.getPersistentEntity(Person.class);
@@ -162,10 +162,7 @@ public class PersistentEntitySerializationTests {
 		assertThat(siblingLink.getHref(), endsWith(new UriTemplate("/{id}/siblings").expand(person.getId()).toString()));
 	}
 
-	/**
-	 * @see DATAREST-248
-	 */
-	@Test
+	@Test // DATAREST-248
 	public void deserializesPersonWithLinkToOtherPersonCorrectly() throws Exception {
 
 		Person father = people.save(new Person("John", "Doe"));
@@ -176,10 +173,7 @@ public class PersistentEntitySerializationTests {
 		assertThat(result.getFather(), is(father));
 	}
 
-	/**
-	 * @see DATAREST-248
-	 */
-	@Test
+	@Test // DATAREST-248
 	public void deserializesPersonWithLinkToOtherPersonsCorrectly() throws Exception {
 
 		Person firstSibling = people.save(new Person("John", "Doe"));
@@ -192,10 +186,7 @@ public class PersistentEntitySerializationTests {
 		assertThat(result.getSiblings(), hasItems(firstSibling, secondSibling));
 	}
 
-	/**
-	 * @see DATAREST-248
-	 */
-	@Test
+	@Test // DATAREST-248
 	public void deserializesEmbeddedAssociationsCorrectly() throws Exception {
 
 		String content = TestUtils.readFileFromClasspath("order.json");
@@ -204,10 +195,7 @@ public class PersistentEntitySerializationTests {
 		assertThat(order.getLineItems(), hasSize(2));
 	}
 
-	/**
-	 * @see DATAREST-250
-	 */
-	@Test
+	@Test // DATAREST-250
 	public void serializesReferencesWithinPagedResourceCorrectly() throws Exception {
 
 		Person creator = new Person("Dave", "Matthews");
@@ -229,10 +217,7 @@ public class PersistentEntitySerializationTests {
 		assertThat(JsonPath.read(result, "$._embedded.orders[*].lineItems"), is(notNullValue()));
 	}
 
-	/**
-	 * @see DATAREST-521
-	 */
-	@Test
+	@Test // DATAREST-521
 	public void serializesLinksForExcerpts() throws Exception {
 
 		Person dave = new Person("Dave", "Matthews");
@@ -255,10 +240,7 @@ public class PersistentEntitySerializationTests {
 		assertThat(JsonPath.read(result, "$._embedded.father[*]._links.self"), is(notNullValue()));
 	}
 
-	/**
-	 * @see DATAREST-521
-	 */
-	@Test
+	@Test // DATAREST-521
 	public void rendersAdditionalLinksRegisteredWithResource() throws Exception {
 
 		Person dave = new Person("Dave", "Matthews");
@@ -274,10 +256,7 @@ public class PersistentEntitySerializationTests {
 		assertThat(JsonPath.read(result, "$._links.processed"), is(notNullValue()));
 	}
 
-	/**
-	 * @see DATAREST-697
-	 */
-	@Test
+	@Test // DATAREST-697
 	public void rendersProjectionWithinSimpleResourceCorrectly() throws Exception {
 
 		Person person = new Person("Dave", "Matthews");
@@ -291,14 +270,34 @@ public class PersistentEntitySerializationTests {
 		assertThat(JsonPath.read(result, "$._links.self"), is(notNullValue()));
 	}
 
-	/**
-	 * @see DATAREST-880
-	 */
-	@Test
+	@Test // DATAREST-880
 	public void unwrapsNestedTypeCorrectly() throws Exception {
 
 		CreditCard creditCard = new CreditCard(new CreditCard.CCN("1234123412341234"));
 
 		assertThat(JsonPath.read(mapper.writeValueAsString(creditCard), "$.ccn"), is("1234123412341234"));
+	}
+
+	@Test // DATAREST-872
+	public void serializesInheritance() throws Exception {
+
+		Suite suite = new Suite();
+		suite.setSuiteCode("Suite 42");
+
+		Dinner dinner = new Dinner();
+		dinner.setDinnerCode("STD_DINNER");
+
+		Guest guest = new Guest();
+		guest.setRoom(suite);
+		guest.addMeal(dinner);
+
+		PersistentEntityResource resource = PersistentEntityResource//
+				.build(guest, context.getPersistentEntity(Guest.class))//
+				.withLink(new Link("/guests/1")).build();
+
+		String result = mapper.writeValueAsString(resource);
+
+		assertThat(JsonPath.read(result, "$.room.type"), equalTo("suite"));
+		assertThat(JsonPath.read(result, "$.meals[0].type"), equalTo("dinner"));
 	}
 }

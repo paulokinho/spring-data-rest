@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2017 original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,9 @@ package org.springframework.data.rest.tests.shop;
 import static org.hamcrest.CoreMatchers.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import java.util.Collections;
+import java.util.Map;
+
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.data.rest.tests.AbstractWebIntegrationTests;
@@ -29,7 +32,10 @@ import org.springframework.test.web.servlet.ResultActions;
 import com.jayway.jsonpath.JsonPath;
 
 /**
+ * Integration tests for projections.
+ * 
  * @author Oliver Gierke
+ * @author Craig Andrews
  */
 @RunWith(SpringJUnit4ClassRunner.class)
 @ContextConfiguration(classes = ShopConfiguration.class)
@@ -54,6 +60,38 @@ public class ShopIntegrationTests extends AbstractWebIntegrationTests {
 
 		// Adds excerpt projection for root level reference
 		expectRelatedResource("customer", actions);
+	}
+
+	@Test // DATAREST-221
+	public void renderProductNameOnlyProjection() throws Exception {
+
+		Map<String, Object> arguments = Collections.singletonMap("projection", "nameOnly");
+
+		client.follow(client.discoverUnique("products").expand(arguments))//
+				.andExpect(status().isOk())//
+				.andExpect(jsonPath("$._embedded.products[0].name", notNullValue()))//
+				.andExpect(jsonPath("$._embedded.products[0].price").doesNotExist());
+	}
+
+	@Test // DATAREST-221
+	public void renderProductNameOnlyProjectionResourceProcessor() throws Exception {
+
+		Map<String, Object> arguments = Collections.singletonMap("projection", "nameOnly");
+
+		client.follow(client.discoverUnique("products").expand(arguments))//
+				.andExpect(status().isOk())//
+				.andExpect(jsonPath("$._embedded.products[0]._links.beta").exists());
+	}
+
+	@Test // DATAREST-221
+	public void renderOrderItemsOnlyProjectionResourceProcessor() throws Exception {
+
+		Map<String, Object> arguments = Collections.singletonMap("projection", "itemsOnly");
+
+		client.follow(client.discoverUnique("orders").expand(arguments))//
+				.andExpect(status().isOk())//
+				.andExpect(jsonPath("$._embedded.orders[0].items[0].products[0].name").exists())//
+				.andExpect(jsonPath("$._embedded.orders[0].items[0].products[0]._links.beta").exists());
 	}
 
 	private static void expectRelatedResource(String name, ResultActions actions) throws Exception {

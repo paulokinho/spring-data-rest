@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,27 @@
  */
 package org.springframework.data.rest.webmvc.json;
 
-import static org.hamcrest.CoreMatchers.*;
+import static org.hamcrest.Matchers.*;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
+import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+import lombok.Value;
+
+import java.io.ByteArrayInputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
+import java.util.GregorianCalendar;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.junit.Before;
@@ -32,6 +46,8 @@ import org.mockito.runners.MockitoJUnitRunner;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.ReadOnlyProperty;
+import org.springframework.data.annotation.Reference;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.keyvalue.core.mapping.context.KeyValueMappingContext;
 import org.springframework.data.mapping.context.PersistentEntities;
@@ -46,11 +62,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategy;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.base.Charsets;
 
 /**
  * Unit tests for {@link DomainObjectReader}.
  * 
  * @author Oliver Gierke
+ * @author Craig Andrews
+ * @author Mathias Düsterhöft
+ * @author Ken Dombeck
  */
 @RunWith(MockitoJUnitRunner.class)
 public class DomainObjectReaderUnitTests {
@@ -68,6 +88,15 @@ public class DomainObjectReaderUnitTests {
 		mappingContext.getPersistentEntity(TypeWithGenericMap.class);
 		mappingContext.getPersistentEntity(VersionedType.class);
 		mappingContext.getPersistentEntity(SampleWithCreatedDate.class);
+		mappingContext.getPersistentEntity(SampleWithTransient.class);
+		mappingContext.getPersistentEntity(User.class);
+		mappingContext.getPersistentEntity(Inner.class);
+		mappingContext.getPersistentEntity(Outer.class);
+		mappingContext.getPersistentEntity(Parent.class);
+		mappingContext.getPersistentEntity(Product.class);
+		mappingContext.getPersistentEntity(TransientReadOnlyProperty.class);
+		mappingContext.getPersistentEntity(CollectionOfEnumWithMethods.class);
+		mappingContext.getPersistentEntity(SampleWithReference.class);
 		mappingContext.afterPropertiesSet();
 
 		PersistentEntities entities = new PersistentEntities(Collections.singleton(mappingContext));
@@ -75,10 +104,7 @@ public class DomainObjectReaderUnitTests {
 		this.reader = new DomainObjectReader(entities, new Associations(mappings, mock(RepositoryRestConfiguration.class)));
 	}
 
-	/**
-	 * @see DATAREST-461
-	 */
-	@Test
+	@Test // DATAREST-461
 	public void doesNotConsiderIgnoredProperties() throws Exception {
 
 		SampleUser user = new SampleUser("firstname", "password");
@@ -90,14 +116,11 @@ public class DomainObjectReaderUnitTests {
 		assertThat(result.password, is("password"));
 	}
 
-	/**
-	 * @see DATAREST-556
-	 */
-	@Test
+	@Test // DATAREST-556
 	public void considersMappedFieldNamesWhenApplyingNodeToDomainObject() throws Exception {
 
 		ObjectMapper mapper = new ObjectMapper();
-		mapper.setPropertyNamingStrategy(PropertyNamingStrategy.PASCAL_CASE_TO_CAMEL_CASE);
+		mapper.setPropertyNamingStrategy(PropertyNamingStrategy.UPPER_CAMEL_CASE);
 
 		JsonNode node = new ObjectMapper().readTree("{\"FirstName\":\"Carter\",\"LastName\":\"Beauford\"}");
 
@@ -107,10 +130,7 @@ public class DomainObjectReaderUnitTests {
 		assertThat(result.lastName, is("Beauford"));
 	}
 
-	/**
-	 * @see DATAREST-605
-	 */
-	@Test
+	@Test // DATAREST-605
 	public void mergesMapCorrectly() throws Exception {
 
 		SampleUser user = new SampleUser("firstname", "password");
@@ -126,10 +146,8 @@ public class DomainObjectReaderUnitTests {
 		assertThat(result.relatedUsers.get("parent").name, is("Oliver"));
 	}
 
-	/**
-	 * @see DATAREST-701
-	 */
-	@Test
+	@Test // DATAREST-701
+	@SuppressWarnings("unchecked")
 	public void mergesNestedMapWithoutTypeInformation() throws Exception {
 
 		ObjectMapper mapper = new ObjectMapper();
@@ -139,13 +157,16 @@ public class DomainObjectReaderUnitTests {
 		target.map = new HashMap<String, Object>();
 		target.map.put("b", new HashMap<String, Object>());
 
-		reader.readPut((ObjectNode) node, target, mapper);
+		TypeWithGenericMap result = reader.readPut((ObjectNode) node, target, mapper);
+
+		assertThat(result.map.get("a"), is((Object) "1"));
+
+		Object object = result.map.get("b");
+		assertThat(object, is(instanceOf(Map.class)));
+		assertThat(((Map<Object, Object>) object).get("c"), is((Object) "2"));
 	}
 
-	/**
-	 * @see DATAREST-701
-	 */
-	@Test(expected = IllegalArgumentException.class)
+	@Test(expected = IllegalArgumentException.class) // DATAREST-701
 	public void rejectsMergingUnknownDomainObject() throws Exception {
 
 		ObjectMapper mapper = new ObjectMapper();
@@ -154,10 +175,7 @@ public class DomainObjectReaderUnitTests {
 		reader.readPut(node, "", mapper);
 	}
 
-	/**
-	 * @see DATAREST-705
-	 */
-	@Test
+	@Test // DATAREST-705
 	public void doesNotWipeIdAndVersionPropertyForPut() throws Exception {
 
 		VersionedType type = new VersionedType();
@@ -176,10 +194,7 @@ public class DomainObjectReaderUnitTests {
 		assertThat(result.version, is(1L));
 	}
 
-	/**
-	 * @see DATAREST-873
-	 */
-	@Test
+	@Test // DATAREST-873
 	public void doesNotApplyInputToReadOnlyFields() throws Exception {
 
 		ObjectMapper mapper = new ObjectMapper();
@@ -193,6 +208,301 @@ public class DomainObjectReaderUnitTests {
 		assertThat(reader.readPut(node, sample, mapper).createdDate, is(reference));
 	}
 
+	@Test // DATAREST-931
+	public void readsPatchForEntityNestedInCollection() throws Exception {
+
+		Phone phone = new Phone();
+		phone.creationDate = new GregorianCalendar();
+
+		User user = new User();
+		user.phones.add(phone);
+
+		ByteArrayInputStream source = new ByteArrayInputStream(
+				"{ \"phones\" : [ { \"label\" : \"some label\" } ] }".getBytes(Charsets.UTF_8));
+
+		User result = reader.read(source, user, new ObjectMapper());
+
+		assertThat(result.phones.get(0).creationDate, is(notNullValue()));
+	}
+
+	@Test // DATAREST-919
+	@SuppressWarnings("unchecked")
+	public void readsComplexNestedMapsAndArrays() throws Exception {
+
+		Map<String, Object> childMap = new HashMap<String, Object>();
+		childMap.put("child1", "ok");
+
+		HashMap<String, Object> nestedMap = new HashMap<String, Object>();
+		nestedMap.put("c1", "v1");
+
+		TypeWithGenericMap map = new TypeWithGenericMap();
+		map.map = new HashMap<String, Object>();
+		map.map.put("sub1", "ok");
+		map.map.put("sub2", new ArrayList<String>(Arrays.asList("ok1", "ok2")));
+		map.map.put("sub3", new ArrayList<Object>(Arrays.asList(childMap)));
+		map.map.put("sub4", nestedMap);
+
+		ObjectMapper mapper = new ObjectMapper();
+		ObjectNode payload = (ObjectNode) mapper.readTree("{ \"map\" : { \"sub1\" : \"ok\","
+				+ " \"sub2\" : [ \"ok1\", \"ok2\" ], \"sub3\" : [ { \"childOk1\" : \"ok\" }], \"sub4\" : {"
+				+ " \"c1\" : \"v1\", \"c2\" : \"new\" } } }");
+
+		TypeWithGenericMap result = reader.readPut(payload, map, mapper);
+
+		assertThat(result.map.get("sub1"), is((Object) "ok"));
+
+		List<String> sub2 = as(result.map.get("sub2"), List.class);
+		assertThat(sub2.get(0), is("ok1"));
+		assertThat(sub2.get(1), is("ok2"));
+
+		List<Map<String, String>> sub3 = as(result.map.get("sub3"), List.class);
+		assertThat(sub3.get(0).get("childOk1"), is("ok"));
+
+		Map<Object, String> sub4 = as(result.map.get("sub4"), Map.class);
+		assertThat(sub4.get("c1"), is("v1"));
+		assertThat(sub4.get("c2"), is("new"));
+	}
+
+	@Test // DATAREST-938
+	public void nestedEntitiesAreUpdated() throws Exception {
+
+		Inner inner = new Inner();
+		inner.name = "inner name";
+		inner.prop = "something";
+
+		Outer outer = new Outer();
+		outer.prop = "else";
+		outer.name = "outer name";
+		outer.inner = inner;
+
+		JsonNode node = new ObjectMapper().readTree("{ \"inner\" : { \"name\" : \"new inner name\" } }");
+
+		Outer result = reader.doMerge((ObjectNode) node, outer, new ObjectMapper());
+
+		assertThat(result, is(sameInstance(outer)));
+		assertThat(result.prop, is("else"));
+		assertThat(result.inner.prop, is("something"));
+		assertThat(result.inner.name, is("new inner name"));
+		assertThat(result.inner, is(sameInstance(inner)));
+	}
+
+	@Test // DATAREST-937
+	public void considersTransientProperties() throws Exception {
+
+		SampleWithTransient sample = new SampleWithTransient();
+		sample.name = "name";
+		sample.temporary = "temp";
+
+		JsonNode node = new ObjectMapper().readTree("{ \"name\" : \"new name\", \"temporary\" : \"new temp\" }");
+
+		SampleWithTransient result = reader.readPut((ObjectNode) node, sample, new ObjectMapper());
+
+		assertThat(result.name, is("new name"));
+		assertThat(result.temporary, is("new temp"));
+	}
+
+	@Test // DATAREST-953
+	public void writesArrayForPut() throws Exception {
+
+		Child inner = new Child();
+		inner.items = new ArrayList<Item>();
+		inner.items.add(new Item());
+
+		Parent source = new Parent();
+		source.inner = inner;
+
+		JsonNode node = new ObjectMapper().readTree("{ \"inner\" : { \"items\" : [ { \"some\" : \"value\" } ] } }");
+
+		Parent result = reader.readPut((ObjectNode) node, source, new ObjectMapper());
+
+		assertThat(result.inner.items.get(0).some, is("value"));
+	}
+
+	@Test // DATAREST-956
+	public void writesArrayWithAddedItemForPut() throws Exception {
+
+		Child inner = new Child();
+		inner.items = new ArrayList<Item>();
+		inner.items.add(new Item());
+
+		Parent source = new Parent();
+		source.inner = inner;
+
+		JsonNode node = new ObjectMapper().readTree("{ \"inner\" : { \"items\" : [ " + "{ \"some\" : \"value1\" },"
+				+ "{ \"some\" : \"value2\" }," + "{ \"some\" : \"value3\" } ] } }");
+
+		Parent result = reader.readPut((ObjectNode) node, source, new ObjectMapper());
+
+		assertThat(result.inner.items.size(), is(3));
+		assertThat(result.inner.items.get(0).some, is("value1"));
+		assertThat(result.inner.items.get(1).some, is("value2"));
+		assertThat(result.inner.items.get(2).some, is("value3"));
+	}
+
+	@Test // DATAREST-956
+	public void writesArrayWithRemovedItemForPut() throws Exception {
+
+		Child inner = new Child();
+		inner.items = new ArrayList<Item>();
+		inner.items.add(new Item("test1"));
+		inner.items.add(new Item("test2"));
+		inner.items.add(new Item("test3"));
+
+		Parent source = new Parent();
+		source.inner = inner;
+
+		JsonNode node = new ObjectMapper().readTree("{ \"inner\" : { \"items\" : [ { \"some\" : \"value\" } ] } }");
+
+		Parent result = reader.readPut((ObjectNode) node, source, new ObjectMapper());
+
+		assertThat(result.inner.items.size(), is(1));
+		assertThat(result.inner.items.get(0).some, is("value"));
+	}
+
+	@Test // DATAREST-959
+	public void addsElementToPreviouslyEmptyCollection() throws Exception {
+
+		Parent source = new Parent();
+		source.inner = new Child();
+		source.inner.items = null;
+
+		JsonNode node = new ObjectMapper().readTree("{ \"inner\" : { \"items\" : [ { \"some\" : \"value\" } ] } }");
+
+		Parent result = reader.readPut((ObjectNode) node, source, new ObjectMapper());
+
+		assertThat(result.inner.items.size(), is(1));
+		assertThat(result.inner.items.get(0).some, is("value"));
+	}
+
+	@Test // DATAREST-959
+	@SuppressWarnings("unchecked")
+	public void turnsObjectIntoCollection() throws Exception {
+
+		Parent source = new Parent();
+		source.inner = new Child();
+		source.inner.object = new Item("value");
+
+		JsonNode node = new ObjectMapper()
+				.readTree("{ \"inner\" : { \"object\" : [ { \"some\" : \"value\" }, { \"some\" : \"otherValue\" } ] } }");
+
+		Parent result = reader.readPut((ObjectNode) node, source, new ObjectMapper());
+		assertThat(result.inner.object, is(instanceOf(Collection.class)));
+
+		Collection<?> collection = (Collection<?>) result.inner.object;
+		assertThat(collection.size(), is(2));
+
+		Iterator<Map<String, Object>> iterator = (Iterator<Map<String, Object>>) collection.iterator();
+		assertThat(iterator.next().get("some"), is((Object) "value"));
+		assertThat(iterator.next().get("some"), is((Object) "otherValue"));
+	}
+
+	@Test // DATAREST-965
+	public void writesObjectWithRemovedItemsForPut() throws Exception {
+
+		Child inner = new Child();
+		inner.items = new ArrayList<Item>();
+		inner.items.add(new Item("test1"));
+		inner.items.add(new Item("test2"));
+
+		Parent source = new Parent();
+		source.inner = inner;
+
+		JsonNode node = new ObjectMapper().readTree("{ \"inner\" : { \"object\" : \"value\" } }");
+
+		Parent result = reader.readPut((ObjectNode) node, source, new ObjectMapper());
+
+		assertThat(result.inner.items, is(nullValue()));
+		assertThat((String) result.inner.object, is("value"));
+	}
+
+	@Test // DATAREST-965
+	public void writesArrayWithRemovedObjectForPut() throws Exception {
+
+		Child inner = new Child();
+		inner.object = "value";
+
+		Parent source = new Parent();
+		source.inner = inner;
+
+		JsonNode node = new ObjectMapper().readTree("{ \"inner\" : { \"items\" : [ { \"some\" : \"value\" } ] } }");
+
+		Parent result = reader.readPut((ObjectNode) node, source, new ObjectMapper());
+
+		assertThat(result.inner.items.size(), is(1));
+		assertThat(result.inner.items.get(0).some, is("value"));
+		assertThat(result.inner.object, is(nullValue()));
+	}
+
+	@Test // DATAREST-986
+	public void readsComplexMap() throws Exception {
+
+		ObjectMapper mapper = new ObjectMapper();
+		JsonNode node = mapper.readTree(
+				"{ \"map\" : { \"en\" : { \"value\" : \"eventual\" }, \"de\" : { \"value\" : \"schlussendlich\" } } }");
+
+		Product result = reader.readPut((ObjectNode) node, new Product(), mapper);
+
+		assertThat(result.map.get(Locale.ENGLISH), is(new LocalizedValue("eventual")));
+		assertThat(result.map.get(Locale.GERMAN), is(new LocalizedValue("schlussendlich")));
+	}
+
+	@Test // DATAREST-987
+	public void handlesTransientPropertyWithoutFieldProperly() throws Exception {
+
+		ObjectMapper mapper = new ObjectMapper();
+		JsonNode node = mapper.readTree("{ \"name\" : \"Foo\" }");
+
+		reader.readPut((ObjectNode) node, new TransientReadOnlyProperty(), mapper);
+	}
+
+	@Test // DATAREST-977
+	public void readsCollectionOfComplexEnum() throws Exception {
+
+		CollectionOfEnumWithMethods sample = new CollectionOfEnumWithMethods();
+		sample.enums.add(SampleEnum.FIRST);
+
+		ObjectMapper mapper = new ObjectMapper();
+		JsonNode node = mapper.readTree("{ \"enums\" : [ \"SECOND\", \"FIRST\" ] }");
+
+		CollectionOfEnumWithMethods result = reader.merge((ObjectNode) node, sample, mapper);
+
+		assertThat(result.enums, contains(SampleEnum.SECOND, SampleEnum.FIRST));
+	}
+
+	@Test // DATAREST-944
+	public void mergesAssociations() {
+
+		List<Nested> originalCollection = Arrays.asList(new Nested(2, 3));
+		SampleWithReference source = new SampleWithReference(Arrays.asList(new Nested(1, 2), new Nested(2, 3)));
+		SampleWithReference target = new SampleWithReference(originalCollection);
+
+		SampleWithReference result = reader.mergeForPut(source, target, new ObjectMapper());
+
+		assertThat(result.nested, is(source.nested));
+		assertThat(result.nested == originalCollection, is(false));
+	}
+
+	@Test // DATAREST-944
+	public void mergesAssociationsAndKeepsMutableCollection() {
+
+		ArrayList<Nested> originalCollection = new ArrayList<Nested>(Arrays.asList(new Nested(2, 3)));
+		SampleWithReference source = new SampleWithReference(
+				new ArrayList<Nested>(Arrays.asList(new Nested(1, 2), new Nested(2, 3))));
+		SampleWithReference target = new SampleWithReference(originalCollection);
+
+		SampleWithReference result = reader.mergeForPut(source, target, new ObjectMapper());
+
+		assertThat(result.nested, is(source.nested));
+		assertThat(result.nested == originalCollection, is(true));
+	}
+
+	@SuppressWarnings("unchecked")
+	private static <T> T as(Object source, Class<T> type) {
+
+		assertThat(source, is(instanceOf(type)));
+		return (T) source;
+	}
+
 	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
 	static class SampleUser {
 
@@ -201,14 +511,15 @@ public class DomainObjectReaderUnitTests {
 		Map<String, SampleUser> relatedUsers;
 
 		public SampleUser(String name, String password) {
+
 			this.name = name;
 			this.password = password;
 		}
+
+		protected SampleUser() {}
 	}
 
-	/**
-	 * @see DATAREST-556
-	 */
+	// DATAREST-556
 	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
 	static class Person {
 
@@ -218,6 +529,8 @@ public class DomainObjectReaderUnitTests {
 			this.firstName = firstName;
 			this.lastName = lastName;
 		}
+
+		protected Person() {}
 	}
 
 	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
@@ -241,5 +554,119 @@ public class DomainObjectReaderUnitTests {
 		@CreatedDate //
 		@ReadOnlyProperty //
 		Date createdDate;
+	}
+
+	static class User {
+
+		public List<Phone> phones = new ArrayList<Phone>();
+	}
+
+	static class Phone {
+
+		public Calendar creationDate;
+		public String label;
+	}
+
+	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
+	static class SampleWithTransient {
+
+		String name;
+		@Transient String temporary;
+	}
+
+	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
+	static class Outer {
+
+		String name;
+		String prop;
+		Inner inner;
+	}
+
+	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
+	static class Inner {
+
+		String name;
+		String prop;
+	}
+
+	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
+	static class Parent {
+		Child inner;
+	}
+
+	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
+	static class Child {
+		List<Item> items;
+		Object object;
+	}
+
+	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
+	@NoArgsConstructor
+	@AllArgsConstructor
+	static class Item {
+		String some;
+	}
+
+	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
+	static class Product {
+		Map<Locale, LocalizedValue> map = new HashMap<Locale, LocalizedValue>();
+	}
+
+	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
+	@NoArgsConstructor
+	@AllArgsConstructor
+	@EqualsAndHashCode
+	static class LocalizedValue {
+		String value;
+	}
+
+	@JsonAutoDetect(getterVisibility = Visibility.ANY)
+	static class TransientReadOnlyProperty {
+
+		@Transient
+		public String getName() {
+			return null;
+		}
+
+		public void setName(String name) {}
+	}
+
+	// DATAREST-977
+
+	interface EnumInterface {
+		String getFoo();
+	}
+
+	static enum SampleEnum implements EnumInterface {
+
+		FIRST {
+
+			@Override
+			public String getFoo() {
+				return "first";
+			}
+
+		},
+		SECOND {
+
+			public String getFoo() {
+				return "second";
+			}
+		};
+	}
+
+	@JsonAutoDetect(fieldVisibility = Visibility.ANY)
+	static class CollectionOfEnumWithMethods {
+		List<SampleEnum> enums = new ArrayList<SampleEnum>();
+	}
+
+	@Value
+	static class SampleWithReference {
+		@Reference List<Nested> nested;
+	}
+
+	@Value
+	static class Nested {
+		int x, y;
 	}
 }

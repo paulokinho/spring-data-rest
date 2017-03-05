@@ -1,6 +1,162 @@
 Spring Data REST Changelog
 ==========================
 
+Changes in version 2.6.1.RELEASE (2017-03-02)
+---------------------------------------------
+* DATAREST-1003 - Implementation details serialized for requests requesting arbitrary JSON response.
+* DATAREST-994 - RepositoryRestHandlerMapping 2 arg constructor broken.
+* DATAREST-992 - Remove references to single-argument assertion methods of Spring.
+* DATAREST-990 - Release 2.6.1 (Ingalls SR1).
+
+
+Changes in version 2.5.7.RELEASE (2017-01-26)
+---------------------------------------------
+* DATAREST-987 - PUT requests fail for transient properties not backed by a field.
+* DATAREST-986 - DomainObjectReader doesn't read complex Maps properly.
+* DATAREST-983 - Annotated event handlers do not resolve generic parameter types.
+* DATAREST-977 - Patch fails on collection containing nested enums with class body.
+* DATAREST-970 - Repository event handlers don't respect @Order annotations.
+* DATAREST-966 - Release 2.5.7 (Hopper SR7).
+* DATAREST-965 - PUT does not remove nested properties.
+* DATAREST-954 - Patching on nested @ElementCollection Map<> using application/merge-patch+json throws org.springframework.orm.jpa.JpaSystemException.
+* DATAREST-944 - Unable to add to a nested collection.
+
+
+Changes in version 2.6.0.RELEASE (2017-01-26)
+---------------------------------------------
+* DATAREST-987 - PUT requests fail for transient properties not backed by a field.
+* DATAREST-986 - DomainObjectReader doesn't read complex Maps properly.
+* DATAREST-983 - Annotated event handlers do not resolve generic parameter types.
+* DATAREST-979 - Update project documentation with the CLA tool integration.
+* DATAREST-978 - Migrate ticket references in test code to Spring Framework style.
+* DATAREST-977 - Patch fails on collection containing nested enums with class body.
+* DATAREST-976 - Sorting by an embedded property no longer works in Ingalls RC1.
+* DATAREST-970 - Repository event handlers don't respect @Order annotations.
+* DATAREST-967 - Release 2.6 GA (Ingalls).
+* DATAREST-965 - PUT does not remove nested properties.
+* DATAREST-954 - Patching on nested @ElementCollection Map<> using application/merge-patch+json throws org.springframework.orm.jpa.JpaSystemException.
+* DATAREST-944 - Unable to add to a nested collection.
+
+
+Changes in version 2.5.6.RELEASE (2016-12-21)
+---------------------------------------------
+* DATAREST-959 - PUT error when merging a previously undefined array.
+* DATAREST-957 - Polish most critical Sonar warnings.
+* DATAREST-956 - PUT does not apply new items in nested collection.
+* DATAREST-953 - PUT empties nested collection.
+* DATAREST-951 - Fix example in reference documentation.
+* DATAREST-950 - Fix typos in reference documentation.
+* DATAREST-938 - Nested entities are replaced with new instances instead of being updated when merging.
+* DATAREST-937 - Transient properties in JSON should be included in merge.
+* DATAREST-932 - Release 2.5.6 (Hopper SR6).
+
+
+Changes in version 2.6.0.RC1 (2016-12-21)
+-----------------------------------------
+* DATAREST-964 - Remove deprecations in RepositoryRestMvcConfiguration.
+* DATAREST-959 - PUT error when merging a previously undefined array.
+* DATAREST-957 - Polish most critical Sonar warnings.
+* DATAREST-956 - PUT does not apply new items in nested collection.
+* DATAREST-953 - PUT empties nested collection.
+* DATAREST-951 - Fix example in reference documentation.
+* DATAREST-950 - Fix typos in reference documentation.
+* DATAREST-941 - Upgrade to HAL browser version that supports nested _embedded declarations.
+* DATAREST-938 - Nested entities are replaced with new instances instead of being updated when merging.
+* DATAREST-937 - Transient properties in JSON should be included in merge.
+* DATAREST-925 - ResourceProcessor not used for nested Projection.
+* DATAREST-919 - PUT/PATCH of Entity object that is a Map silently dropping elements of Map.
+* DATAREST-910 - Support nested Sort properties.
+* DATAREST-906 - MappingAwarePageableArgumentResolver accidentally drops default Pageable returned from delegate PageableHandlerMethodArgumentResolver.
+* DATAREST-899 - User registered Hibernate 5 Jackson module should be preferred over the one registered by default.
+* DATAREST-898 - Typo in EntityLookupConfiguration assertion message.
+* DATAREST-897 - NestedEntitySerializer fails to serialize Map for Hibernate proxy.
+* DATAREST-892 - Fix integration tests failing due to more precise Content-Type headers returned by Spring MVC 4.3.
+* DATAREST-889 - JSON Patch silently nullifies property values.
+* DATAREST-887 - JsonLateObjectEvaluator uses hard-coded ObjectMapper.
+* DATAREST-886 - JSON Patch for arrays is broken.
+* DATAREST-885 - Patch with object value omitted.
+* DATAREST-883 - Sort mapping does not consider Jackson customizations in field names.
+* DATAREST-881 - ResourceProcessor is not invoked if RepositoryEntityController does not return a subtype of Resources.
+* DATAREST-880 - @JsonUnwrapped annotation ignored.
+* DATAREST-873 - Allow excluding properties from being nullified in PUT requests.
+* DATAREST-872 - Jackson's @JsonTypeInfo is not supported.
+* DATAREST-868 - Fix Solr integration tests after Jackson upgrade.
+* DATAREST-866 - NullPointerException from RepositoryRestConfiguration if you inject mvcValidator into RepositoryRestConfigurer.
+* DATAREST-864 - NestedEntitySerializer does not support Maps.
+* DATAREST-863 - REST calls to /api always redirect to HAL Browser if no accept header is specified.
+* DATAREST-862 - Release 2.6 RC1 (Ingalls).
+* DATAREST-859 - Broken links to included code in conditionals reference documentation.
+* DATAREST-858 - Broken links to included code in security reference documentation.
+* DATAREST-835 - Add persistent entity headers to single entity searches.
+* DATAREST-793 - Some setter methods in RepositoryRestConfiguration do not return RepositoryRestConfiguration.
+* DATAREST-607 - Jackson2DatatypeHelper should register Jackson's Hibernate 5 module automatically if present.
+* DATAREST-575 - Insufficient check for the presence of a PersistentProperty in MappedProperties.
+* DATAREST-573 - Add support for Spring Web MVC CORS configuration mechanisms.
+
+
+Changes in version 3.0.0.M1 (2016-11-23)
+----------------------------------------
+* DATAREST-935 - Set up 3.0 development.
+* DATAREST-934 - Release 3.0 M1 (Kay).
+
+
+Changes in version 2.5.5.RELEASE (2016-11-03)
+---------------------------------------------
+* DATAREST-931 - PATCH for non-resource associations doesn't work as expected.
+* DATAREST-915 - Release 2.5.5 (Hopper SR5).
+* DATAREST-575 - Insufficient check for the presence of a PersistentProperty in MappedProperties.
+
+
+Changes in version 2.5.4.RELEASE (2016-09-29)
+---------------------------------------------
+* DATAREST-909 - Revert Jackson-aware Sort and Pageable translation in Hopper and Gosling release trains.
+* DATAREST-908 - Regression with custom controllers.
+* DATAREST-906 - MappingAwarePageableArgumentResolver accidentally drops default Pageable returned from delegate PageableHandlerMethodArgumentResolver.
+* DATAREST-903 - Release 2.5.4 (Hopper SR4).
+
+
+Changes in version 2.4.6.RELEASE (2016-09-29)
+---------------------------------------------
+* DATAREST-913 - Release 2.4.6 (Gosling SR6).
+* DATAREST-909 - Revert Jackson-aware Sort and Pageable translation in Hopper and Gosling release trains.
+* DATAREST-908 - Regression with custom controllers.
+* DATAREST-906 - MappingAwarePageableArgumentResolver accidentally drops default Pageable returned from delegate PageableHandlerMethodArgumentResolver.
+
+
+Changes in version 2.4.5.RELEASE (2016-09-20)
+---------------------------------------------
+* DATAREST-902 - Fix order dependent DuplicateLinkListingTests.
+* DATAREST-901 - Release 2.4.5 (Gosling SR5).
+* DATAREST-883 - Sort mapping does not consider Jackson customizations in field names.
+* DATAREST-873 - Allow excluding properties from being nullified in PUT requests.
+* DATAREST-863 - REST calls to /api always redirect to HAL Browser if no accept header is specified.
+* DATAREST-847 - RepositoryEntityController.saveAndReturn calls AfterSaveEvent with wrong domain object.
+* DATAREST-815 - HAL browser redirect fails when proxied through Zuul.
+* DATAREST-720 - HAL Browser default URI doesn't respect context path.
+
+
+Changes in version 2.5.3.RELEASE (2016-09-20)
+---------------------------------------------
+* DATAREST-898 - Typo in EntityLookupConfiguration assertion message.
+* DATAREST-897 - NestedEntitySerializer fails to serialize Map for Hibernate proxy.
+* DATAREST-889 - JSON Patch silently nullifies property values.
+* DATAREST-887 - JsonLateObjectEvaluator uses hard-coded ObjectMapper.
+* DATAREST-886 - JSON Patch for arrays is broken.
+* DATAREST-885 - Patch with object value omitted.
+* DATAREST-883 - Sort mapping does not consider Jackson customizations in field names.
+* DATAREST-881 - ResourceProcessor is not invoked if RepositoryEntityController does not return a subtype of Resources.
+* DATAREST-880 - @JsonUnwrapped annotation ignored.
+* DATAREST-873 - Allow excluding properties from being nullified in PUT requests.
+* DATAREST-872 - Jackson's @JsonTypeInfo is not supported.
+* DATAREST-866 - NullPointerException from RepositoryRestConfiguration if you inject mvcValidator into RepositoryRestConfigurer.
+* DATAREST-864 - NestedEntitySerializer does not support Maps.
+* DATAREST-863 - REST calls to /api always redirect to HAL Browser if no accept header is specified.
+* DATAREST-859 - Broken links to included code in conditionals reference documentation.
+* DATAREST-858 - Broken links to included code in security reference documentation.
+* DATAREST-847 - RepositoryEntityController.saveAndReturn calls AfterSaveEvent with wrong domain object.
+* DATAREST-842 - Release 2.5.3 (Hopper SR3).
+
+
 Changes in version 2.6.0.M1 (2016-07-27)
 ----------------------------------------
 * DATAREST-856 - Integrate version badge from spring.io.
@@ -602,7 +758,7 @@ Changes in version 2.0.0.RC1 (2014-01-29)
     * [DATAREST-203] - Move to HAL as default hypermedia format
     * [DATAREST-219] - Improve handling of updates to related collection properties
     * [DATAREST-229] - RepositoryEntityLinks should exposed templated link for pageable collection resources
-    * [DATAREST-233] - Improve annotation based customization 
+    * [DATAREST-233] - Improve annotation based customization
 
 ** Task
     * [DATAREST-220] - Add contribution guidelines

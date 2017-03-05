@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2015 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,10 @@
  */
 package org.springframework.data.rest.webmvc;
 
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
+
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -23,15 +27,23 @@ import java.util.Set;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.AnnotationUtils;
+import org.springframework.data.repository.support.Repositories;
 import org.springframework.data.rest.core.config.RepositoryRestConfiguration;
 import org.springframework.data.rest.core.mapping.ResourceMappings;
+import org.springframework.data.rest.core.mapping.ResourceMetadata;
 import org.springframework.data.rest.webmvc.support.JpaHelper;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.http.converter.json.AbstractJackson2HttpMessageConverter;
 import org.springframework.orm.jpa.support.OpenEntityManagerInViewInterceptor;
 import org.springframework.util.Assert;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.util.StringValueResolver;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.condition.ProducesRequestCondition;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
@@ -42,28 +54,41 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
  * {@link org.springframework.data.repository.Repository} is exported under that URL path segment. Also ensures the
  * {@link OpenEntityManagerInViewInterceptor} is registered in the application context. The OEMIVI is required for the
  * REST exporter to function properly.
- * 
+ *
  * @author Jon Brisbin
  * @author Oliver Gierke
+ * @author Mark Paluch
  */
 public class RepositoryRestHandlerMapping extends BasePathAwareHandlerMapping {
 
-	private static final MediaType EVERYTHING_JSON_MEDIA_TYPE = new MediaType("application", "*+json",
-			AbstractJackson2HttpMessageConverter.DEFAULT_CHARSET);
-
 	private final ResourceMappings mappings;
 	private final RepositoryRestConfiguration configuration;
+	private final Repositories repositories;
 
+	private RepositoryCorsConfigurationAccessor corsConfigurationAccessor;
 	private JpaHelper jpaHelper;
 
 	/**
 	 * Creates a new {@link RepositoryRestHandlerMapping} for the given {@link ResourceMappings} and
 	 * {@link RepositoryRestConfiguration}.
-	 * 
+	 *
 	 * @param mappings must not be {@literal null}.
 	 * @param config must not be {@literal null}.
 	 */
 	public RepositoryRestHandlerMapping(ResourceMappings mappings, RepositoryRestConfiguration config) {
+		this(mappings, config, null);
+	}
+
+	/**
+	 * Creates a new {@link RepositoryRestHandlerMapping} for the given {@link ResourceMappings}
+	 * {@link RepositoryRestConfiguration} and {@link Repositories}.
+	 *
+	 * @param mappings must not be {@literal null}.
+	 * @param config must not be {@literal null}.
+	 * @param repositories can be {@literal null} if {@link CrossOrigin} resolution is not required.
+	 */
+	public RepositoryRestHandlerMapping(ResourceMappings mappings, RepositoryRestConfiguration config,
+			Repositories repositories) {
 
 		super(config);
 
@@ -72,6 +97,9 @@ public class RepositoryRestHandlerMapping extends BasePathAwareHandlerMapping {
 
 		this.mappings = mappings;
 		this.configuration = config;
+		this.repositories = repositories;
+		this.corsConfigurationAccessor = new RepositoryCorsConfigurationAccessor(mappings, NoOpStringValueResolver.INSTANCE,
+				repositories);
 	}
 
 	/**
@@ -81,7 +109,20 @@ public class RepositoryRestHandlerMapping extends BasePathAwareHandlerMapping {
 		this.jpaHelper = jpaHelper;
 	}
 
-	/* 
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping#setEmbeddedValueResolver(org.springframework.util.StringValueResolver)
+	 */
+	@Override
+	public void setEmbeddedValueResolver(StringValueResolver resolver) {
+
+		super.setEmbeddedValueResolver(resolver);
+
+		this.corsConfigurationAccessor = new RepositoryCorsConfigurationAccessor(mappings,
+				resolver == null ? NoOpStringValueResolver.INSTANCE : resolver, repositories);
+	}
+
+	/*
 	 * (non-Javadoc)
 	 * @see org.springframework.web.servlet.handler.AbstractHandlerMethodMapping#lookupHandlerMethod(java.lang.String, javax.servlet.http.HttpServletRequest)
 	 */
@@ -150,14 +191,34 @@ public class RepositoryRestHandlerMapping extends BasePathAwareHandlerMapping {
 		HashSet<String> mediaTypes = new LinkedHashSet<String>();
 		mediaTypes.add(configuration.getDefaultMediaType().toString());
 		mediaTypes.add(MediaType.APPLICATION_JSON_VALUE);
-		mediaTypes.add(EVERYTHING_JSON_MEDIA_TYPE.toString());
 
 		return new ProducesRequestCondition(mediaTypes.toArray(new String[mediaTypes.size()]));
 	}
 
+	/* (non-Javadoc)
+	 * @see org.springframework.web.servlet.handler.AbstractHandlerMethodMapping#getCorsConfiguration(java.lang.Object, javax.servlet.http.HttpServletRequest)
+	 */
+	@Override
+	protected CorsConfiguration getCorsConfiguration(Object handler, HttpServletRequest request) {
+
+		CorsConfiguration corsConfiguration = super.getCorsConfiguration(handler, request);
+		String lookupPath = getUrlPathHelper().getLookupPathForRequest(request);
+
+		String repositoryLookupPath = new BaseUri(configuration.getBaseUri()).getRepositoryLookupPath(lookupPath);
+
+		if (!StringUtils.hasText(repositoryLookupPath) || repositories == null) {
+			return corsConfiguration;
+		}
+
+		CorsConfiguration repositoryCorsConfiguration = corsConfigurationAccessor.findCorsConfiguration(lookupPath);
+
+		return corsConfiguration == null ? repositoryCorsConfiguration
+				: corsConfiguration.combine(repositoryCorsConfiguration);
+	}
+
 	/**
 	 * Returns the first segment of the given repository lookup path.
-	 * 
+	 *
 	 * @param repositoryLookupPath must not be {@literal null}.
 	 * @return
 	 */
@@ -165,5 +226,144 @@ public class RepositoryRestHandlerMapping extends BasePathAwareHandlerMapping {
 
 		int secondSlashIndex = repositoryLookupPath.indexOf('/', repositoryLookupPath.startsWith("/") ? 1 : 0);
 		return secondSlashIndex == -1 ? repositoryLookupPath : repositoryLookupPath.substring(0, secondSlashIndex);
+	}
+
+	/**
+	 * No-op {@link StringValueResolver} that returns the given {@link String} value as is.
+	 *
+	 * @author Oliver Gierke
+	 * @since 2.6
+	 */
+	enum NoOpStringValueResolver implements StringValueResolver {
+
+		INSTANCE;
+
+		/* 
+		 * (non-Javadoc)
+		 * @see org.springframework.util.StringValueResolver#resolveStringValue(java.lang.String)
+		 */
+		@Override
+		public String resolveStringValue(String value) {
+			return value;
+		}
+	}
+
+	/**
+	 * Accessor to obtain {@link CorsConfiguration} for exposed repositories.
+	 * <p>
+	 * Exported repository classes can be annotated with {@link CrossOrigin} to configure CORS for a specific repository.
+	 *
+	 * @author Mark Paluch
+	 * @author Oliver Gierke
+	 * @since 2.6
+	 */
+	@RequiredArgsConstructor
+	static class RepositoryCorsConfigurationAccessor {
+
+		private final @NonNull ResourceMappings mappings;
+		private final @NonNull StringValueResolver embeddedValueResolver;
+		private final Repositories repositories;
+
+		CorsConfiguration findCorsConfiguration(String lookupPath) {
+
+			ResourceMetadata resource = getResourceMetadata(getRepositoryBasePath(lookupPath));
+
+			return resource != null && repositories != null ? createConfiguration(
+					repositories.getRepositoryInformationFor(resource.getDomainType()).getRepositoryInterface()) : null;
+		}
+
+		private ResourceMetadata getResourceMetadata(String basePath) {
+
+			if (mappings.exportsTopLevelResourceFor(basePath)) {
+
+				for (ResourceMetadata metadata : mappings) {
+					if (metadata.getPath().matches(basePath) && metadata.isExported()) {
+						return metadata;
+					}
+				}
+			}
+
+			return null;
+		}
+
+		/**
+		 * Creates {@link CorsConfiguration} from a repository interface.
+		 *
+		 * @param repositoryInterface the repository interface
+		 * @return {@link CorsConfiguration} or {@literal null}.
+		 */
+		protected CorsConfiguration createConfiguration(Class<?> repositoryInterface) {
+
+			CrossOrigin typeAnnotation = AnnotatedElementUtils.findMergedAnnotation(repositoryInterface, CrossOrigin.class);
+
+			if (typeAnnotation == null) {
+				return null;
+			}
+
+			CorsConfiguration config = new CorsConfiguration();
+			updateCorsConfig(config, typeAnnotation);
+
+			if (CollectionUtils.isEmpty(config.getAllowedOrigins())) {
+				config.setAllowedOrigins(Arrays.asList(CrossOrigin.DEFAULT_ORIGINS));
+			}
+
+			if (CollectionUtils.isEmpty(config.getAllowedMethods())) {
+				for (HttpMethod httpMethod : HttpMethod.values()) {
+					config.addAllowedMethod(httpMethod);
+				}
+			}
+
+			if (CollectionUtils.isEmpty(config.getAllowedHeaders())) {
+				config.setAllowedHeaders(Arrays.asList(CrossOrigin.DEFAULT_ALLOWED_HEADERS));
+			}
+
+			if (config.getAllowCredentials() == null) {
+				config.setAllowCredentials(CrossOrigin.DEFAULT_ALLOW_CREDENTIALS);
+			}
+
+			if (config.getMaxAge() == null) {
+				config.setMaxAge(CrossOrigin.DEFAULT_MAX_AGE);
+			}
+
+			return config;
+		}
+
+		private void updateCorsConfig(CorsConfiguration config, CrossOrigin annotation) {
+
+			for (String origin : annotation.origins()) {
+				config.addAllowedOrigin(resolveCorsAnnotationValue(origin));
+			}
+
+			for (RequestMethod method : annotation.methods()) {
+				config.addAllowedMethod(method.name());
+			}
+
+			for (String header : annotation.allowedHeaders()) {
+				config.addAllowedHeader(resolveCorsAnnotationValue(header));
+			}
+
+			for (String header : annotation.exposedHeaders()) {
+				config.addExposedHeader(resolveCorsAnnotationValue(header));
+			}
+
+			String allowCredentials = resolveCorsAnnotationValue(annotation.allowCredentials());
+
+			if ("true".equalsIgnoreCase(allowCredentials)) {
+				config.setAllowCredentials(true);
+			} else if ("false".equalsIgnoreCase(allowCredentials)) {
+				config.setAllowCredentials(false);
+			} else if (!allowCredentials.isEmpty()) {
+				throw new IllegalStateException("@CrossOrigin's allowCredentials value must be \"true\", \"false\", "
+						+ "or an empty string (\"\"): current value is [" + allowCredentials + "]");
+			}
+
+			if (annotation.maxAge() >= 0 && config.getMaxAge() == null) {
+				config.setMaxAge(annotation.maxAge());
+			}
+		}
+
+		private String resolveCorsAnnotationValue(String value) {
+			return this.embeddedValueResolver.resolveStringValue(value);
+		}
 	}
 }
